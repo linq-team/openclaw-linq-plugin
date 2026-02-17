@@ -4,6 +4,25 @@ import type { OpenClawConfig } from "openclaw/plugin-sdk";
 
 const LINQ_API_BASE = "https://api.linqapp.com/api/partner/v3";
 const UA = "OpenClaw-Linq/1.0";
+const MAX_RETRIES = 2;
+const RETRY_DELAY_MS = 500;
+
+async function fetchWithRetry(
+  url: string,
+  init: RequestInit,
+  retries = MAX_RETRIES,
+): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    const response = await fetch(url, init);
+    if (response.status === 429 && attempt < retries) {
+      const retryAfter = Number(response.headers.get("retry-after")) || 0;
+      const delay = retryAfter > 0 ? retryAfter * 1000 : RETRY_DELAY_MS * 2 ** attempt;
+      await new Promise((r) => setTimeout(r, Math.min(delay, 10_000)));
+      continue;
+    }
+    return response;
+  }
+}
 
 export type LinqSendOpts = {
   accountId?: string;
@@ -43,7 +62,7 @@ export async function sendMessageLinq(
   }
 
   const url = `${LINQ_API_BASE}/chats/${encodeURIComponent(to)}/messages`;
-  const response = await fetch(url, {
+  const response = await fetchWithRetry(url, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,

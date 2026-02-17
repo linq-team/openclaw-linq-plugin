@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type {
   LinqMediaPart,
   LinqMessageReceivedData,
+  LinqReactionReceivedData,
   LinqTextPart,
   LinqWebhookEvent,
 } from "./types.js";
@@ -371,6 +372,15 @@ export async function monitorLinqProvider(opts: MonitorLinqOpts = {}): Promise<v
       if (event.event_type === "message.received") {
         const data = event.data as LinqMessageReceivedData;
         await inboundDebouncer.enqueue({ event: data });
+      } else if (event.event_type === "reaction.received") {
+        const data = event.data as LinqReactionReceivedData;
+        if (!data.is_from_me && data.reaction) {
+          logVerbose(
+            `linq reaction: ${data.reaction.operation} ${data.reaction.type} from=${data.from} msg=${data.message_id}`,
+          );
+        }
+      } else if (event.event_type === "message.delivery_status") {
+        logVerbose(`linq delivery: ${(event.data as { status?: string })?.status} msg=${(event.data as { message_id?: string })?.message_id}`);
       }
     } catch (err) {
       opts.runtime?.error?.(`linq webhook parse error: ${String(err)}`);
