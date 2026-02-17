@@ -1,0 +1,29 @@
+{
+  "name": "openclaw-linq-plugin",
+  "version": "1.0.0",
+  "description": "Linq iMessage channel plugin for OpenClaw — real iMessage over API, no Mac required",
+  "type": "module",
+  "main": "index.ts",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/linq-team/openclaw-linq-plugin.git"
+  },
+  "keywords": [
+    "openclaw",
+    "linq",
+    "imessage",
+    "channel",
+    "plugin",
+    "sms",
+    "messaging"
+  ],
+  "peerDependencies": {
+    "openclaw": ">=2026.1.0"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}
