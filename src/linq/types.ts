@@ -37,6 +37,25 @@ export type LinqMediaPart = {
 };
 export type LinqMessagePart = LinqTextPart | LinqMediaPart;
 
+export type LinqReactionReceivedData = {
+  chat_id: string;
+  from: string;
+  message_id: string;
+  reaction: {
+    type: "love" | "like" | "dislike" | "laugh" | "emphasize" | "question";
+    operation: "add" | "remove";
+  };
+  received_at: string;
+  is_from_me: boolean;
+};
+
+export type LinqDeliveryStatusData = {
+  chat_id: string;
+  message_id: string;
+  status: "delivered" | "read" | "failed";
+  updated_at: string;
+};
+
 export type LinqSendResult = {
   messageId: string;
   chatId: string;
