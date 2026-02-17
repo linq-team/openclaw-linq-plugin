@@ -283,7 +283,7 @@ export const linqPlugin: ChannelPlugin<ResolvedLinqAccount, LinqProbe> = {
       return monitorLinqProvider({
         accountId: account.accountId,
         config: ctx.cfg,
-        runtime: ctx.runtime,
+        runtime: ctx.log,
         abortSignal: ctx.abortSignal,
       });
     },
