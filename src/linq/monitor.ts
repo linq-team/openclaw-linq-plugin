@@ -302,19 +302,20 @@ export async function monitorLinqProvider(opts: MonitorLinqOpts = {}): Promise<v
       accountId: route.accountId,
     });
 
-    await rt.channel.reply.dispatchReplyFromConfig({
+    await rt.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
       ctx: ctxPayload,
       cfg,
-      channel: "linq",
-      accountId: route.accountId,
-      deliver: async (payload) => {
-        const replyText = typeof payload === "string" ? payload : (payload.text ?? "");
-        if (replyText) {
-          await sendMessageLinq(chatId, replyText, {
-            token,
-            accountId: accountInfo.accountId,
-          });
-        }
+      dispatcherOptions: {
+        ...prefixOptions,
+        deliver: async (payload) => {
+          const replyText = typeof payload === "string" ? payload : (payload.text ?? "");
+          if (replyText) {
+            await sendMessageLinq(chatId, replyText, {
+              token,
+              accountId: accountInfo.accountId,
+            });
+          }
+        },
       },
     });
   }
