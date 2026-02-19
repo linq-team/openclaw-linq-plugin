@@ -87,25 +87,35 @@ export async function sendMessageLinq(
   };
 }
 
-export async function startTypingLinq(chatId: string, token: string): Promise<void> {
-  const url = `${LINQ_API_BASE}/chats/${encodeURIComponent(chatId)}/typing`;
-  await fetch(url, {
+/**
+ * Fire-and-forget helper for side-effect API calls (typing, read receipts, reactions).
+ * Swallows errors so callers don't need `.catch(() => {})` everywhere.
+ */
+async function fireAndForget(url: string, init: RequestInit): Promise<boolean> {
+  try {
+    const res = await fetch(url, init);
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function startTypingLinq(chatId: string, token: string): Promise<boolean> {
+  return fireAndForget(`${LINQ_API_BASE}/chats/${encodeURIComponent(chatId)}/typing`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "User-Agent": UA },
   });
 }
 
-export async function stopTypingLinq(chatId: string, token: string): Promise<void> {
-  const url = `${LINQ_API_BASE}/chats/${encodeURIComponent(chatId)}/typing`;
-  await fetch(url, {
+export async function stopTypingLinq(chatId: string, token: string): Promise<boolean> {
+  return fireAndForget(`${LINQ_API_BASE}/chats/${encodeURIComponent(chatId)}/typing`, {
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}`, "User-Agent": UA },
   });
 }
 
-export async function markAsReadLinq(chatId: string, token: string): Promise<void> {
-  const url = `${LINQ_API_BASE}/chats/${encodeURIComponent(chatId)}/read`;
-  await fetch(url, {
+export async function markAsReadLinq(chatId: string, token: string): Promise<boolean> {
+  return fireAndForget(`${LINQ_API_BASE}/chats/${encodeURIComponent(chatId)}/read`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "User-Agent": UA },
   });
@@ -116,9 +126,8 @@ export async function sendReactionLinq(
   type: "love" | "like" | "dislike" | "laugh" | "emphasize" | "question",
   token: string,
   operation: "add" | "remove" = "add",
-): Promise<void> {
-  const url = `${LINQ_API_BASE}/messages/${encodeURIComponent(messageId)}/reactions`;
-  await fetch(url, {
+): Promise<boolean> {
+  return fireAndForget(`${LINQ_API_BASE}/messages/${encodeURIComponent(messageId)}/reactions`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,

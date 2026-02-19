@@ -166,8 +166,8 @@ export async function monitorLinqProvider(opts: MonitorLinqOpts = {}): Promise<v
       return;
     }
 
-    markAsReadLinq(chatId, token).catch(() => {});
-    startTypingLinq(chatId, token).catch(() => {});
+    markAsReadLinq(chatId, token);
+    startTypingLinq(chatId, token);
 
     const storeAllowFrom = await rt.channel.pairing.readAllowFromStore("linq").catch(() => []);
     const effectiveDmAllowFrom = Array.from(new Set([...allowFrom, ...storeAllowFrom]))
