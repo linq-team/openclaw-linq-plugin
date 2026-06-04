@@ -22,7 +22,7 @@ The wizard will walk you through:
 2. **Phone number** — the Linq phone number shown in your dashboard (E.164 format, e.g. `+15551234567`)
 3. **Webhook config** — URL, path, and host for inbound message delivery (defaults to `http://localhost:3100/linq-webhook`)
 
-You can also set `LINQ_API_TOKEN` as an environment variable instead of storing the token in config.
+Prefer a SecretRef for credentials. `LINQ_API_TOKEN` is still supported as a default-account setup convenience.
 
 ## Usage
 
@@ -43,7 +43,7 @@ After running the wizard, your `openclaw.json` will contain:
   "channels": {
     "linq": {
       "enabled": true,
-      "apiToken": "your-token",
+      "apiToken": { "source": "env", "id": "LINQ_API_TOKEN" },
       "fromPhone": "+15551234567",
       "dmPolicy": "open",
       "webhookUrl": "http://localhost:3100/linq-webhook",
@@ -66,12 +66,12 @@ Multiple Linq accounts are supported via the `accounts` field:
       "accounts": {
         "sales": {
           "enabled": true,
-          "apiToken": "token-1",
+          "apiToken": { "source": "env", "id": "LINQ_SALES_TOKEN" },
           "fromPhone": "+15551111111"
         },
         "support": {
           "enabled": true,
-          "apiToken": "token-2",
+          "apiToken": { "source": "env", "id": "LINQ_SUPPORT_TOKEN" },
           "fromPhone": "+15552222222"
         }
       }
@@ -84,8 +84,8 @@ Multiple Linq accounts are supported via the `accounts` field:
 
 Control who can message your agent:
 
-- `"open"` (default) — anyone can message
-- `"pairing"` — new senders must enter a pairing code
+- `"open"` (default in this version) — anyone can message
+- `"pairing"` — new senders must enter a pairing code once durable pairing setup is enabled
 - `"disabled"` — no inbound DMs
 
 ### Webhook security
@@ -96,11 +96,21 @@ Set a `webhookSecret` to enable HMAC signature verification on inbound webhooks:
 {
   "channels": {
     "linq": {
-      "webhookSecret": "your-secret"
+      "webhookSecret": { "source": "env", "id": "LINQ_WEBHOOK_SECRET" }
     }
   }
 }
 ```
+
+### Targets
+
+Outbound targets use explicit Linq target grammar:
+
+- `linq:+15556667777` for first contact by phone number
+- `linq:chat:<chat_id>` for an existing direct chat
+- `linq:<accountId>:+15556667777` for an account-scoped phone send
+
+Group targets are reserved but disabled in this version.
 
 ## Features
 
@@ -110,6 +120,7 @@ Set a `webhookSecret` to enable HMAC signature verification on inbound webhooks:
 - Typing indicators and read receipts
 - Media (image) support
 - Webhook signature verification (HMAC-SHA256)
+- Webhook event dedupe by Linq `event_id`
 - Multi-account support
 - DM policy and allowlist controls
 - Pairing code flow for new contacts
