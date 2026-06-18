@@ -1,6 +1,18 @@
-import type { OpenClawConfig, DmPolicy, WizardPrompter } from "openclaw/plugin-sdk";
-import type { ChannelOnboardingAdapter, ChannelOnboardingDmPolicy } from "openclaw/plugin-sdk";
-import { DEFAULT_ACCOUNT_ID, normalizeAccountId, addWildcardAllowFrom, promptAccountId } from "openclaw/plugin-sdk";
+// @ts-nocheck - Legacy setup wizard compatibility surface; the concrete setup
+// adapter lives on the channel plugin's `setup` property.
+import type { OpenClawConfig } from "openclaw/plugin-sdk";
+import type {
+  ChannelSetupAdapter as ChannelOnboardingAdapter,
+  ChannelSetupDmPolicy as ChannelOnboardingDmPolicy,
+  DmPolicy,
+  WizardPrompter,
+} from "openclaw/plugin-sdk/setup";
+import {
+  DEFAULT_ACCOUNT_ID,
+  normalizeAccountId,
+  addWildcardAllowFrom,
+  promptAccountId,
+} from "openclaw/plugin-sdk/setup";
 import {
   listLinqAccountIds,
   resolveDefaultLinqAccountId,

@@ -59,6 +59,10 @@ export type LinqDeliveryStatusData = {
 export type LinqSendResult = {
   messageId: string;
   chatId: string;
+  target: string;
+  accountId?: string;
+  fromPhone?: string;
+  traceId?: string;
 };
 
 export type LinqProbe = {
@@ -67,12 +71,18 @@ export type LinqProbe = {
   phoneNumbers?: string[];
 };
 
+export type LinqSecretRef = {
+  source: "env" | "file";
+  provider?: string;
+  id: string;
+};
+
 /** Per-account config for the Linq channel (mirrors the Zod schema shape). */
 export type LinqAccountConfig = {
   name?: string;
   enabled?: boolean;
-  /** Linq API bearer token. */
-  apiToken?: string;
+  /** Linq API bearer token or SecretRef-backed token. */
+  apiToken?: string | LinqSecretRef;
   /** Read token from file instead of config (mutual exclusive with apiToken). */
   tokenFile?: string;
   /** Phone number this account sends from (E.164). */
@@ -91,8 +101,8 @@ export type LinqAccountConfig = {
   textChunkLimit?: number;
   /** Webhook URL for inbound messages from Linq. */
   webhookUrl?: string;
-  /** Webhook HMAC signing secret. */
-  webhookSecret?: string;
+  /** Webhook HMAC signing secret or SecretRef-backed secret. */
+  webhookSecret?: string | LinqSecretRef;
   /** Local HTTP path prefix for the webhook listener (default: /linq-webhook). */
   webhookPath?: string;
   /** Local HTTP host to bind the webhook listener on. */
@@ -105,4 +115,6 @@ export type LinqAccountConfig = {
   groups?: Record<string, unknown>;
   /** Per-account sub-accounts. */
   accounts?: Record<string, LinqAccountConfig>;
+  /** Preferred default account id. */
+  defaultAccount?: string;
 };

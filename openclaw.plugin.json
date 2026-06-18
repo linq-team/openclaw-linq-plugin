@@ -4,6 +4,91 @@
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
-    "properties": {}
+    "properties": {
+      "enabled": { "type": "boolean" },
+      "name": { "type": "string", "minLength": 1 },
+      "apiToken": {
+        "anyOf": [{ "type": "string", "minLength": 1 }, { "$ref": "#/$defs/secretRef" }]
+      },
+      "tokenFile": { "type": "string", "minLength": 1 },
+      "fromPhone": { "type": "string", "pattern": "^\\+[1-9]\\d{6,14}$" },
+      "dmPolicy": { "enum": ["pairing", "open", "disabled"], "default": "open" },
+      "allowFrom": {
+        "type": "array",
+        "items": { "anyOf": [{ "type": "string" }, { "type": "number" }] }
+      },
+      "webhookUrl": { "type": "string", "format": "uri" },
+      "webhookSecret": {
+        "anyOf": [{ "type": "string", "minLength": 1 }, { "$ref": "#/$defs/secretRef" }]
+      },
+      "webhookPath": {
+        "type": "string",
+        "pattern": "^/[A-Za-z0-9/_-]*$",
+        "default": "/linq-webhook"
+      },
+      "webhookHost": { "type": "string", "minLength": 1, "default": "0.0.0.0" },
+      "accounts": { "type": "object", "additionalProperties": true },
+      "defaultAccount": { "type": "string", "minLength": 1 }
+    },
+    "$defs": {
+      "secretRef": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source", "id"],
+        "properties": {
+          "source": { "enum": ["env", "file"] },
+          "provider": { "type": "string", "default": "default" },
+          "id": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  },
+  "channelConfigs": {
+    "linq": {
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": { "type": "boolean" },
+          "name": { "type": "string", "minLength": 1 },
+          "apiToken": {
+            "anyOf": [{ "type": "string", "minLength": 1 }, { "$ref": "#/$defs/secretRef" }]
+          },
+          "tokenFile": { "type": "string", "minLength": 1 },
+          "fromPhone": { "type": "string", "pattern": "^\\+[1-9]\\d{6,14}$" },
+          "dmPolicy": { "enum": ["pairing", "open", "disabled"], "default": "open" },
+          "allowFrom": {
+            "type": "array",
+            "items": { "anyOf": [{ "type": "string" }, { "type": "number" }] }
+          },
+          "webhookUrl": { "type": "string", "format": "uri" },
+          "webhookSecret": {
+            "anyOf": [{ "type": "string", "minLength": 1 }, { "$ref": "#/$defs/secretRef" }]
+          },
+          "webhookPath": {
+            "type": "string",
+            "pattern": "^/[A-Za-z0-9/_-]*$",
+            "default": "/linq-webhook"
+          },
+          "webhookHost": { "type": "string", "minLength": 1, "default": "0.0.0.0" },
+          "accounts": { "type": "object", "additionalProperties": true },
+          "defaultAccount": { "type": "string", "minLength": 1 }
+        },
+        "$defs": {
+          "secretRef": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["source", "id"],
+            "properties": {
+              "source": { "enum": ["env", "file"] },
+              "provider": { "type": "string", "default": "default" },
+              "id": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      },
+      "label": "Linq",
+      "description": "Linq iMessage channel"
+    }
   }
 }

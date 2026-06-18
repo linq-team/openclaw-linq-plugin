@@ -5,6 +5,11 @@
   "type": "module",
   "main": "index.ts",
   "license": "MIT",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm run test"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/linq-team/openclaw-linq-plugin.git"
@@ -19,7 +24,15 @@
     "messaging"
   ],
   "peerDependencies": {
-    "openclaw": ">=2026.1.0"
+    "openclaw": ">=2026.6.0"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.2"
   },
   "openclaw": {
     "extensions": [

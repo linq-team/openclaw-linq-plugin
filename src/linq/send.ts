@@ -1,6 +1,7 @@
 import type { LinqSendResult } from "./types.js";
 import { resolveLinqAccount, type ResolvedLinqAccount } from "./accounts.js";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
+import { parseLinqTarget, type LinqTarget } from "./targets.js";
 
 const LINQ_API_BASE = "https://api.linqapp.com/api/partner/v3";
 const UA = "OpenClaw-Linq/1.0";
@@ -32,18 +33,45 @@ export type LinqSendOpts = {
   token?: string;
   config?: OpenClawConfig;
   account?: ResolvedLinqAccount;
+  idempotencyKey?: string;
 };
+
+function buildSendUrl(target: LinqTarget, fromPhone?: string): string {
+  if (target.kind === "phone") {
+    if (!fromPhone?.trim()) {
+      throw new Error("Linq phone targets require fromPhone on the selected account");
+    }
+    return `${LINQ_API_BASE}/chats`;
+  }
+  return `${LINQ_API_BASE}/chats/${encodeURIComponent(target.chatId)}/messages`;
+}
+
+function buildSendBody(
+  target: LinqTarget,
+  message: Record<string, unknown>,
+  fromPhone?: string,
+): Record<string, unknown> {
+  if (target.kind === "phone") {
+    if (!fromPhone?.trim()) {
+      throw new Error("Linq phone targets require fromPhone on the selected account");
+    }
+    return { from: fromPhone.trim(), to: [target.phone], message };
+  }
+  return { message };
+}
 
 export async function sendMessageLinq(
   to: string,
   text: string,
   opts: LinqSendOpts = {},
 ): Promise<LinqSendResult> {
-  const account = opts.account ?? (opts.config ? resolveLinqAccount({ cfg: opts.config, accountId: opts.accountId }) : undefined);
-  const token = opts.token?.trim() || account?.token;
-  if (!token) {
-    throw new Error("Linq API token not configured");
-  }
+  const target = parseLinqTarget(to, opts.accountId ?? opts.account?.accountId);
+  const account =
+    opts.account && (!target.accountId || target.accountId === opts.account.accountId)
+      ? opts.account
+      : opts.config
+        ? resolveLinqAccount({ cfg: opts.config, accountId: target.accountId ?? opts.accountId })
+        : opts.account;
 
   const parts: Array<Record<string, unknown>> = [];
   if (text) {
@@ -61,15 +89,27 @@ export async function sendMessageLinq(
     message.reply_to = { message_id: opts.replyToMessageId.trim() };
   }
 
-  const url = `${LINQ_API_BASE}/chats/${encodeURIComponent(to)}/messages`;
+  if (target.kind === "group") {
+    throw new Error("Linq group sends are not enabled in this plugin version");
+  }
+  const resolvedAccount = account;
+  const resolvedToken = opts.token?.trim() || resolvedAccount?.token;
+  if (!resolvedToken) {
+    throw new Error("Linq API token not configured");
+  }
+  const url = buildSendUrl(target, resolvedAccount?.fromPhone);
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${resolvedToken}`,
+    "Content-Type": "application/json",
+    "User-Agent": UA,
+  };
+  if (opts.idempotencyKey?.trim()) {
+    headers["Idempotency-Key"] = opts.idempotencyKey.trim();
+  }
   const response = await fetchWithRetry(url, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      "User-Agent": UA,
-    },
-    body: JSON.stringify({ message }),
+    headers,
+    body: JSON.stringify(buildSendBody(target, message, resolvedAccount?.fromPhone)),
   });
 
   if (!response.ok) {
@@ -78,12 +118,27 @@ export async function sendMessageLinq(
   }
 
   const data = (await response.json()) as {
+    id?: string;
     chat_id?: string;
+    message_id?: string;
     message?: { id?: string };
+    chat?: { id?: string };
+    trace_id?: string;
   };
+  const messageId =
+    data.message?.id ?? data.message_id ?? (data.chat_id && data.id ? data.id : "unknown");
+  const chatId =
+    data.chat_id ??
+    data.chat?.id ??
+    (target.kind === "phone" ? data.id : undefined) ??
+    (target.kind === "chat" ? target.chatId : "unknown");
   return {
-    messageId: data.message?.id ?? "unknown",
-    chatId: data.chat_id ?? to,
+    messageId,
+    chatId,
+    target: target.raw,
+    accountId: target.accountId ?? resolvedAccount?.accountId,
+    fromPhone: resolvedAccount?.fromPhone,
+    traceId: data.trace_id,
   };
 }
 

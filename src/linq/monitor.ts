@@ -1,4 +1,3 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type {
   LinqMediaPart,
@@ -8,10 +7,15 @@ import type {
   LinqWebhookEvent,
 } from "./types.js";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
-import { createReplyPrefixOptions } from "openclaw/plugin-sdk";
+import { createReplyPrefixOptions } from "openclaw/plugin-sdk/channel-outbound";
 import { resolveLinqAccount } from "./accounts.js";
 import { markAsReadLinq, sendMessageLinq, startTypingLinq } from "./send.js";
 import { getLinqRuntime } from "../runtime.js";
+import { createLinqWebhookHandler, createMemoryLinqWebhookDedupeStore } from "./webhook.js";
+
+const LINQ_WEBHOOK_MAX_BYTES = 1024 * 1024;
+const LINQ_WEBHOOK_REPLAY_WINDOW_SECONDS = 300;
+const LINQ_WEBHOOK_DEDUPE_TTL_MS = 24 * 60 * 60 * 1000;
 
 export type MonitorLinqOpts = {
   accountId?: string;
@@ -45,19 +49,62 @@ function extractMediaUrls(
     .map((p) => ({ url: p.url, mimeType: p.mime_type }));
 }
 
-function verifyWebhookSignature(
-  secret: string,
-  payload: string,
-  timestamp: string,
-  signature: string,
-): boolean {
-  const message = `${timestamp}.${payload}`;
-  const expected = createHmac("sha256", secret).update(message).digest("hex");
-  try {
-    return timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(signature, "hex"));
-  } catch {
-    return false;
+export function normalizeLinqMessageReceivedData(raw: unknown): LinqMessageReceivedData | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
   }
+  const data = raw as Record<string, unknown>;
+  const legacyMessage = data.message as { id?: unknown; parts?: unknown; reply_to?: unknown } | undefined;
+  if (
+    typeof data.chat_id === "string" &&
+    typeof data.from === "string" &&
+    legacyMessage &&
+    typeof legacyMessage.id === "string" &&
+    Array.isArray(legacyMessage.parts)
+  ) {
+    return data as LinqMessageReceivedData;
+  }
+
+  const chat = data.chat as
+    | {
+        id?: unknown;
+        owner_handle?: { handle?: unknown };
+      }
+    | undefined;
+  const senderHandle = data.sender_handle as { handle?: unknown; is_me?: unknown } | undefined;
+  if (
+    typeof chat?.id !== "string" ||
+    typeof senderHandle?.handle !== "string" ||
+    !Array.isArray(data.parts) ||
+    typeof data.id !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    chat_id: chat.id,
+    from: senderHandle.handle,
+    recipient_phone:
+      typeof chat.owner_handle?.handle === "string" ? chat.owner_handle.handle : "",
+    received_at:
+      typeof data.sent_at === "string"
+        ? data.sent_at
+        : typeof data.created_at === "string"
+          ? data.created_at
+          : "",
+    is_from_me:
+      data.direction === "outbound" ||
+      senderHandle.is_me === true,
+    service:
+      data.service === "SMS" || data.service === "RCS" || data.service === "iMessage"
+        ? data.service
+        : "iMessage",
+    message: {
+      id: data.id,
+      parts: data.parts as LinqMessageReceivedData["message"]["parts"],
+      reply_to: data.reply_to as LinqMessageReceivedData["message"]["reply_to"],
+    },
+  };
 }
 
 function isAllowedLinqSender(allowFrom: string[], sender: string): boolean {
@@ -88,8 +135,8 @@ export async function monitorLinqProvider(opts: MonitorLinqOpts = {}): Promise<v
   }
 
   const allowFrom = normalizeAllowList(linqCfg.allowFrom);
-  const dmPolicy = linqCfg.dmPolicy ?? "pairing";
-  const webhookSecret = linqCfg.webhookSecret?.trim() ?? "";
+  const dmPolicy = linqCfg.dmPolicy ?? "open";
+  const webhookSecret = accountInfo.webhookSecret;
   const webhookPath = linqCfg.webhookPath?.trim() || "/linq-webhook";
   const webhookHost = linqCfg.webhookHost?.trim() || "0.0.0.0";
   const fromPhone = accountInfo.fromPhone;
@@ -169,7 +216,9 @@ export async function monitorLinqProvider(opts: MonitorLinqOpts = {}): Promise<v
     markAsReadLinq(chatId, token);
     startTypingLinq(chatId, token);
 
-    const storeAllowFrom = await rt.channel.pairing.readAllowFromStore("linq").catch(() => []);
+    const storeAllowFrom = await rt.channel.pairing
+      .readAllowFromStore({ channel: "linq", accountId: accountInfo.accountId })
+      .catch(() => []);
     const effectiveDmAllowFrom = Array.from(new Set([...allowFrom, ...storeAllowFrom]))
       .map((v) => String(v).trim())
       .filter(Boolean);
@@ -189,13 +238,14 @@ export async function monitorLinqProvider(opts: MonitorLinqOpts = {}): Promise<v
         const { code, created } = await rt.channel.pairing.upsertPairingRequest({
           channel: "linq",
           id: sender,
+          accountId: accountInfo.accountId,
           meta: { sender, chatId },
         });
         if (created) {
           logVerbose(`linq pairing request sender=${sender}`);
           try {
             await sendMessageLinq(
-              chatId,
+              `linq:chat:${chatId}`,
               rt.channel.pairing.buildPairingReply({
                 channel: "linq",
                 idLine: `Your phone number: ${sender}`,
@@ -310,7 +360,7 @@ export async function monitorLinqProvider(opts: MonitorLinqOpts = {}): Promise<v
         deliver: async (payload) => {
           const replyText = typeof payload === "string" ? payload : (payload.text ?? "");
           if (replyText) {
-            await sendMessageLinq(chatId, replyText, {
+            await sendMessageLinq(`linq:chat:${chatId}`, replyText, {
               token,
               accountId: accountInfo.accountId,
             });
@@ -322,18 +372,20 @@ export async function monitorLinqProvider(opts: MonitorLinqOpts = {}): Promise<v
 
   // --- HTTP webhook server ---
   const port = linqCfg.webhookUrl ? new URL(linqCfg.webhookUrl).port || "0" : "0";
+  const webhookHandler = createLinqWebhookHandler({
+    path: webhookPath,
+    secret: webhookSecret,
+    maxBytes: LINQ_WEBHOOK_MAX_BYTES,
+    replayWindowSeconds: LINQ_WEBHOOK_REPLAY_WINDOW_SECONDS,
+    dedupeTtlMs: LINQ_WEBHOOK_DEDUPE_TTL_MS,
+    dedupeStore: createMemoryLinqWebhookDedupeStore(),
+  });
 
   const server: Server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url || "/", `http://${req.headers.host}`);
-    if (req.method !== "POST" || !url.pathname.startsWith(webhookPath)) {
-      res.writeHead(404);
-      res.end();
-      return;
-    }
-
     const chunks: Buffer[] = [];
     let size = 0;
-    const maxPayloadBytes = 1024 * 1024;
+    const maxPayloadBytes = LINQ_WEBHOOK_MAX_BYTES;
     for await (const chunk of req) {
       size += (chunk as Buffer).length;
       if (size > maxPayloadBytes) {
@@ -343,35 +395,28 @@ export async function monitorLinqProvider(opts: MonitorLinqOpts = {}): Promise<v
       }
       chunks.push(chunk as Buffer);
     }
-    const rawBody = Buffer.concat(chunks).toString("utf8");
+    const result = await webhookHandler({
+      method: req.method ?? "GET",
+      path: url.pathname,
+      headers: req.headers,
+      body: Buffer.concat(chunks),
+    });
 
-    if (webhookSecret) {
-      const timestamp = req.headers["x-webhook-timestamp"] as string | undefined;
-      const signature = req.headers["x-webhook-signature"] as string | undefined;
-      if (
-        !timestamp ||
-        !signature ||
-        !verifyWebhookSignature(webhookSecret, rawBody, timestamp, signature)
-      ) {
-        res.writeHead(401);
-        res.end("invalid signature");
-        return;
-      }
-      const age = Math.abs(Date.now() / 1000 - Number(timestamp));
-      if (!Number.isFinite(age) || age > 300) {
-        res.writeHead(401);
-        res.end("stale timestamp");
-        return;
-      }
+    res.writeHead(result.status, { "Content-Type": "application/json" });
+    res.end(result.body);
+
+    if (!result.event || result.duplicate) {
+      return;
     }
 
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ received: true }));
-
     try {
-      const event = JSON.parse(rawBody) as LinqWebhookEvent;
+      const event = result.event as LinqWebhookEvent;
       if (event.event_type === "message.received") {
-        const data = event.data as LinqMessageReceivedData;
+        const data = normalizeLinqMessageReceivedData(event.data);
+        if (!data) {
+          logVerbose(`linq webhook ignored malformed message.received event ${event.event_id}`);
+          return;
+        }
         await inboundDebouncer.enqueue({ event: data });
       } else if (event.event_type === "reaction.received") {
         const data = event.data as LinqReactionReceivedData;
