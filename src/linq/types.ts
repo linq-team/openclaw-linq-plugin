@@ -72,7 +72,7 @@ export type LinqProbe = {
 };
 
 export type LinqSecretRef = {
-  source: "env" | "file";
+  source: "env" | "file" | "exec";
   provider?: string;
   id: string;
 };
@@ -105,7 +105,7 @@ export type LinqAccountConfig = {
   webhookSecret?: string | LinqSecretRef;
   /** Local HTTP path prefix for the webhook listener (default: /linq-webhook). */
   webhookPath?: string;
-  /** Local HTTP host to bind the webhook listener on. */
+  /** Deprecated: OpenClaw owns plugin route binding. */
   webhookHost?: string;
   /** History limit for group chats. */
   historyLimit?: number;

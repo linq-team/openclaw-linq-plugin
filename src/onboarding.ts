@@ -17,9 +17,88 @@ import {
   listLinqAccountIds,
   resolveDefaultLinqAccountId,
   resolveLinqAccount,
+  resolveLinqAccountForStatus,
 } from "./linq/accounts.js";
+import { probeLinq } from "./linq/probe.js";
+import {
+  createLinqWebhookSubscription,
+  deleteLinqWebhookSubscription,
+  findLinqWebhookSubscription,
+  findReplaceableLinqWebhookSubscriptions,
+  listLinqWebhookSubscriptions,
+} from "./linq/subscriptions.js";
 
 const channel = "linq" as const;
+const webhookPathPattern = /^\/[A-Za-z0-9/_-]*$/u;
+
+function validateWebhookPath(value: string | undefined): string | undefined {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) {
+    return "Required";
+  }
+  return webhookPathPattern.test(trimmed)
+    ? undefined
+    : "Use a path like /linq-webhook with letters, numbers, _, -, or /.";
+}
+
+function parseWebhookUrl(value: string | undefined): URL | null {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) {
+    return null;
+  }
+  try {
+    return new URL(trimmed);
+  } catch {
+    return null;
+  }
+}
+
+function validateWebhookUrl(value: string | undefined): string | undefined {
+  const url = parseWebhookUrl(value);
+  if (!url) {
+    return "Enter a valid URL.";
+  }
+  if (url.pathname === "/") {
+    return "Include a webhook path, for example /linq-webhook.";
+  }
+  return validateWebhookPath(url.pathname);
+}
+
+function setLinqAccountPatch(
+  cfg: OpenClawConfig,
+  accountId: string,
+  patch: Record<string, unknown>,
+): OpenClawConfig {
+  if (accountId === DEFAULT_ACCOUNT_ID) {
+    return {
+      ...cfg,
+      channels: {
+        ...cfg.channels,
+        linq: {
+          ...cfg.channels?.linq,
+          ...patch,
+        },
+      },
+    };
+  }
+  return {
+    ...cfg,
+    channels: {
+      ...cfg.channels,
+      linq: {
+        ...cfg.channels?.linq,
+        enabled: true,
+        accounts: {
+          ...cfg.channels?.linq?.accounts,
+          [accountId]: {
+            ...cfg.channels?.linq?.accounts?.[accountId],
+            ...patch,
+          },
+        },
+      },
+    },
+  };
+}
 
 function setLinqDmPolicy(cfg: OpenClawConfig, dmPolicy: DmPolicy) {
   const allowFrom =
@@ -58,6 +137,148 @@ async function noteLinqPhoneHelp(prompter: WizardPrompter): Promise<void> {
   );
 }
 
+async function selectLinqPhone(params: {
+  prompter: WizardPrompter;
+  token: string;
+  existingPhone?: string;
+}): Promise<string> {
+  const { prompter, token, existingPhone } = params;
+  let phoneNumbers: string[] = [];
+  try {
+    const probe = await probeLinq(token, 5000);
+    phoneNumbers = probe.ok ? (probe.phoneNumbers ?? []) : [];
+    if (!probe.ok && probe.error) {
+      await prompter.note(`Could not list Linq phone numbers: ${probe.error}`, "Linq phone lookup");
+    }
+  } catch (err) {
+    await prompter.note(`Could not list Linq phone numbers: ${String(err)}`, "Linq phone lookup");
+  }
+
+  if (phoneNumbers.length > 0) {
+    return String(
+      await prompter.select({
+        message: "Linq sender phone number",
+        initialValue: existingPhone && phoneNumbers.includes(existingPhone) ? existingPhone : phoneNumbers[0],
+        options: phoneNumbers.map((phone) => ({ value: phone, label: phone })),
+      }),
+    );
+  }
+
+  await noteLinqPhoneHelp(prompter);
+  return String(
+    await prompter.text({
+      message: "Linq phone number (E.164 format, e.g. +15551234567)",
+      initialValue: existingPhone,
+      validate: (value) => (value?.trim() ? undefined : "Required"),
+    }),
+  ).trim();
+}
+
+async function maybeCreateLinqWebhookSubscription(params: {
+  prompter: WizardPrompter;
+  token: string;
+  webhookUrl: string;
+  previousWebhookUrl?: string;
+  fromPhone: string;
+  previousFromPhone?: string;
+  hasWebhookSecret: boolean;
+}): Promise<string | null> {
+  const {
+    prompter,
+    token,
+    webhookUrl,
+    previousWebhookUrl,
+    fromPhone,
+    previousFromPhone,
+    hasWebhookSecret,
+  } = params;
+  if (!token?.trim()) {
+    return null;
+  }
+  try {
+    const subscriptions = await listLinqWebhookSubscriptions(token);
+    const parsedWebhookUrl = parseWebhookUrl(webhookUrl);
+    const isPublicHttps = parsedWebhookUrl?.protocol === "https:";
+    const existing = findLinqWebhookSubscription(subscriptions, webhookUrl, fromPhone);
+    if (existing) {
+      await prompter.note(
+        `Found Linq webhook subscription ${existing.id} for ${webhookUrl}.`,
+        "Linq webhook",
+      );
+      if (hasWebhookSecret) {
+        return null;
+      }
+      if (!isPublicHttps) {
+        await prompter.note(
+          "Skipping Linq webhook subscription recreation because the webhook URL is not HTTPS.",
+          "Linq webhook",
+        );
+        return null;
+      }
+      const recreateForSecret = await prompter.confirm({
+        message: "Recreate the existing Linq webhook subscription to store its signing secret?",
+        initialValue: true,
+      });
+      if (!recreateForSecret) {
+        await prompter.note(
+          "Linq only returns the signing secret when creating a subscription. Delete/recreate the subscription or enter the secret manually if inbound signatures fail.",
+          "Linq webhook secret",
+        );
+        return null;
+      }
+      await deleteLinqWebhookSubscription({ token, subscriptionId: existing.id });
+    }
+
+    if (!isPublicHttps) {
+      await prompter.note(
+        "Skipping Linq webhook subscription creation because the webhook URL is not HTTPS.",
+        "Linq webhook",
+      );
+      return null;
+    }
+
+    const replaceable = findReplaceableLinqWebhookSubscriptions(subscriptions, {
+      targetUrl: webhookUrl,
+      phoneNumber: fromPhone,
+      previousTargetUrl: previousWebhookUrl,
+      previousPhoneNumber: previousFromPhone,
+    });
+    if (replaceable.length > 0) {
+      const replace = await prompter.confirm({
+        message: `Replace ${replaceable.length} stale Linq webhook subscription${replaceable.length === 1 ? "" : "s"} before creating the current one?`,
+        initialValue: true,
+      });
+      if (!replace) {
+        return null;
+      }
+      for (const subscription of replaceable) {
+        await deleteLinqWebhookSubscription({ token, subscriptionId: subscription.id });
+      }
+    }
+
+    const create = await prompter.confirm({
+      message: "Create Linq webhook subscription for inbound messages?",
+      initialValue: true,
+    });
+    if (!create) {
+      return null;
+    }
+    const subscription = await createLinqWebhookSubscription({
+      token,
+      targetUrl: webhookUrl,
+      phoneNumber: fromPhone,
+    });
+    await prompter.note(
+      `Created Linq webhook subscription ${subscription.id}.`,
+      "Linq webhook",
+    );
+    return subscription.signing_secret?.trim() || null;
+  } catch (err) {
+    await prompter.note(`Could not configure Linq webhook subscription: ${String(err)}`, "Linq webhook");
+    return null;
+  }
+}
+
 const dmPolicy: ChannelOnboardingDmPolicy = {
   label: "Linq",
   channel,
@@ -71,7 +292,7 @@ export const linqOnboardingAdapter: ChannelOnboardingAdapter = {
   channel,
   getStatus: async ({ cfg }) => {
     const configured = listLinqAccountIds(cfg).some((accountId) =>
-      Boolean(resolveLinqAccount({ cfg, accountId }).token),
+      Boolean(resolveLinqAccountForStatus({ cfg, accountId }).token),
     );
     return {
       channel,
@@ -167,112 +388,38 @@ export const linqOnboardingAdapter: ChannelOnboardingAdapter = {
     }
 
     if (token) {
-      if (linqAccountId === DEFAULT_ACCOUNT_ID) {
-        next = {
-          ...next,
-          channels: {
-            ...next.channels,
-            linq: {
-              ...next.channels?.linq,
-              enabled: true,
-              apiToken: token,
-            },
-          },
-        };
-      } else {
-        next = {
-          ...next,
-          channels: {
-            ...next.channels,
-            linq: {
-              ...next.channels?.linq,
-              enabled: true,
-              accounts: {
-                ...next.channels?.linq?.accounts,
-                [linqAccountId]: {
-                  ...next.channels?.linq?.accounts?.[linqAccountId],
-                  enabled: next.channels?.linq?.accounts?.[linqAccountId]?.enabled ?? true,
-                  apiToken: token,
-                },
-              },
-            },
-          },
-        };
-      }
+      next = setLinqAccountPatch(next, linqAccountId, { enabled: true, apiToken: token });
     }
 
     // --- fromPhone ---
-    await noteLinqPhoneHelp(prompter);
-    const existingPhone = resolvedAccount.fromPhone;
-    const fromPhone = String(
-      await prompter.text({
-        message: "Linq phone number (E.164 format, e.g. +15551234567)",
-        initialValue: existingPhone,
-        validate: (value) => (value?.trim() ? undefined : "Required"),
-      }),
-    ).trim();
+    const accountAfterToken = resolveLinqAccount({ cfg: next, accountId: linqAccountId });
+    const previousFromPhone = accountAfterToken.fromPhone;
+    const fromPhone = await selectLinqPhone({
+      prompter,
+      token: accountAfterToken.token,
+      existingPhone: accountAfterToken.fromPhone,
+    });
 
-    if (linqAccountId === DEFAULT_ACCOUNT_ID) {
-      next = {
-        ...next,
-        channels: {
-          ...next.channels,
-          linq: {
-            ...next.channels?.linq,
-            fromPhone,
-          },
-        },
-      };
-    } else {
-      next = {
-        ...next,
-        channels: {
-          ...next.channels,
-          linq: {
-            ...next.channels?.linq,
-            accounts: {
-              ...next.channels?.linq?.accounts,
-              [linqAccountId]: {
-                ...next.channels?.linq?.accounts?.[linqAccountId],
-                fromPhone,
-              },
-            },
-          },
-        },
-      };
-    }
+    next = setLinqAccountPatch(next, linqAccountId, { fromPhone });
 
     // --- Webhook config ---
     const linqSection = (next.channels as Record<string, unknown> | undefined)?.linq as
       | Record<string, unknown>
       | undefined;
+    const existingWebhookPath = (linqSection?.webhookPath as string) ?? "/linq-webhook";
     const existingWebhookUrl =
-      (linqSection?.webhookUrl as string) ?? "http://localhost:3100/linq-webhook";
+      (linqSection?.webhookUrl as string) ?? `http://localhost:3100${existingWebhookPath}`;
+    const previousWebhookUrl =
+      typeof linqSection?.webhookUrl === "string" ? linqSection.webhookUrl : undefined;
     const webhookUrl = String(
       await prompter.text({
         message: "Webhook URL",
         initialValue: existingWebhookUrl,
-        validate: (value) => (value?.trim() ? undefined : "Required"),
+        validate: validateWebhookUrl,
       }),
     ).trim();
 
-    const existingWebhookPath = (linqSection?.webhookPath as string) ?? "/linq-webhook";
-    const webhookPath = String(
-      await prompter.text({
-        message: "Webhook path",
-        initialValue: existingWebhookPath,
-        validate: (value) => (value?.trim() ? undefined : "Required"),
-      }),
-    ).trim();
-
-    const existingWebhookHost = (linqSection?.webhookHost as string) ?? "0.0.0.0";
-    const webhookHost = String(
-      await prompter.text({
-        message: "Webhook host",
-        initialValue: existingWebhookHost,
-        validate: (value) => (value?.trim() ? undefined : "Required"),
-      }),
-    ).trim();
+    const webhookPath = parseWebhookUrl(webhookUrl)?.pathname ?? existingWebhookPath;
 
     next = {
       ...next,
@@ -282,10 +429,23 @@ export const linqOnboardingAdapter: ChannelOnboardingAdapter = {
           ...next.channels?.linq,
           webhookUrl,
           webhookPath,
-          webhookHost,
         },
       },
     };
+
+    const accountAfterWebhook = resolveLinqAccount({ cfg: next, accountId: linqAccountId });
+    const webhookSecret = await maybeCreateLinqWebhookSubscription({
+      prompter,
+      token: accountAfterWebhook.token,
+      webhookUrl,
+      previousWebhookUrl,
+      fromPhone,
+      previousFromPhone,
+      hasWebhookSecret: Boolean(accountAfterWebhook.webhookSecret),
+    });
+    if (webhookSecret) {
+      next = setLinqAccountPatch(next, linqAccountId, { webhookSecret });
+    }
 
     if (!next.channels?.linq?.dmPolicy) {
       next = setLinqDmPolicy(next, "open");
