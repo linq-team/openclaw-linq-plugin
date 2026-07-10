@@ -37,6 +37,13 @@
   "openclaw": {
     "extensions": [
       "./index.ts"
-    ]
+    ],
+    "setupEntry": "./setup-entry.ts",
+    "channel": {
+      "id": "linq",
+      "label": "Linq",
+      "selectionLabel": "Linq (Messaging API)",
+      "blurb": "iMessage, RCS, and SMS through the Linq API."
+    }
   }
 }

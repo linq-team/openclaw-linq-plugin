@@ -13,8 +13,10 @@ openclaw plugins install github:linq-team/openclaw-linq-plugin
 Run the interactive setup wizard:
 
 ```bash
-openclaw channels add --channel linq
+openclaw configure --section channels
 ```
+
+Select **Linq (Messaging API)** from the channel list.
 
 The wizard will walk you through:
 
