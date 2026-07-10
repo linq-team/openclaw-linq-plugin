@@ -1,4 +1,4 @@
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import type {
   LinqMediaPart,
   LinqMessageReceivedData,
@@ -7,7 +7,8 @@ import type {
   LinqWebhookEvent,
 } from "./types.js";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
-import { createReplyPrefixOptions } from "openclaw/plugin-sdk/channel-outbound";
+import { createReplyPrefixOptions, waitUntilAbort } from "openclaw/plugin-sdk/channel-outbound";
+import { registerPluginHttpRoute } from "openclaw/plugin-sdk/webhook-ingress";
 import { resolveLinqAccount } from "./accounts.js";
 import { markAsReadLinq, sendMessageLinq, startTypingLinq } from "./send.js";
 import { getLinqRuntime } from "../runtime.js";
@@ -16,6 +17,7 @@ import { createLinqWebhookHandler, createMemoryLinqWebhookDedupeStore } from "./
 const LINQ_WEBHOOK_MAX_BYTES = 1024 * 1024;
 const LINQ_WEBHOOK_REPLAY_WINDOW_SECONDS = 300;
 const LINQ_WEBHOOK_DEDUPE_TTL_MS = 24 * 60 * 60 * 1000;
+const activeWebhookPaths = new Map<string, string>();
 
 export type MonitorLinqOpts = {
   accountId?: string;
@@ -138,7 +140,6 @@ export async function monitorLinqProvider(opts: MonitorLinqOpts = {}): Promise<v
   const dmPolicy = linqCfg.dmPolicy ?? "open";
   const webhookSecret = accountInfo.webhookSecret;
   const webhookPath = linqCfg.webhookPath?.trim() || "/linq-webhook";
-  const webhookHost = linqCfg.webhookHost?.trim() || "0.0.0.0";
   const fromPhone = accountInfo.fromPhone;
 
   const inboundDebounceMs = rt.channel.debounce.resolveInboundDebounceMs({ cfg, channel: "linq" });
@@ -370,8 +371,6 @@ export async function monitorLinqProvider(opts: MonitorLinqOpts = {}): Promise<v
     });
   }
 
-  // --- HTTP webhook server ---
-  const port = linqCfg.webhookUrl ? new URL(linqCfg.webhookUrl).port || "0" : "0";
   const webhookHandler = createLinqWebhookHandler({
     path: webhookPath,
     secret: webhookSecret,
@@ -381,85 +380,78 @@ export async function monitorLinqProvider(opts: MonitorLinqOpts = {}): Promise<v
     dedupeStore: createMemoryLinqWebhookDedupeStore(),
   });
 
-  const server: Server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
-    const url = new URL(req.url || "/", `http://${req.headers.host}`);
-    const chunks: Buffer[] = [];
-    let size = 0;
-    const maxPayloadBytes = LINQ_WEBHOOK_MAX_BYTES;
-    for await (const chunk of req) {
-      size += (chunk as Buffer).length;
-      if (size > maxPayloadBytes) {
-        res.writeHead(413);
-        res.end();
-        return;
-      }
-      chunks.push(chunk as Buffer);
-    }
-    const result = await webhookHandler({
-      method: req.method ?? "GET",
-      path: url.pathname,
-      headers: req.headers,
-      body: Buffer.concat(chunks),
-    });
+  const currentPathOwner = activeWebhookPaths.get(webhookPath);
+  if (currentPathOwner && currentPathOwner !== accountInfo.accountId) {
+    throw new Error(
+      `Linq webhook path ${webhookPath} is already registered by account ${currentPathOwner}; configure a distinct webhookPath for account ${accountInfo.accountId}.`,
+    );
+  }
 
-    res.writeHead(result.status, { "Content-Type": "application/json" });
-    res.end(result.body);
-
-    if (!result.event || result.duplicate) {
-      return;
-    }
-
-    try {
-      const event = result.event as LinqWebhookEvent;
-      if (event.event_type === "message.received") {
-        const data = normalizeLinqMessageReceivedData(event.data);
-        if (!data) {
-          logVerbose(`linq webhook ignored malformed message.received event ${event.event_id}`);
+  const unregister = registerPluginHttpRoute({
+    path: webhookPath,
+    auth: "plugin",
+    pluginId: "linq",
+    accountId: accountInfo.accountId,
+    replaceExisting: true,
+    log: (msg) => opts.runtime?.info(msg),
+    handler: async (req: IncomingMessage, res: ServerResponse) => {
+      const url = new URL(req.url || "/", `http://${req.headers.host}`);
+      const chunks: Buffer[] = [];
+      let size = 0;
+      const maxPayloadBytes = LINQ_WEBHOOK_MAX_BYTES;
+      for await (const chunk of req) {
+        size += (chunk as Buffer).length;
+        if (size > maxPayloadBytes) {
+          res.writeHead(413);
+          res.end();
           return;
         }
-        await inboundDebouncer.enqueue({ event: data });
-      } else if (event.event_type === "reaction.received") {
-        const data = event.data as LinqReactionReceivedData;
-        if (!data.is_from_me && data.reaction) {
-          logVerbose(
-            `linq reaction: ${data.reaction.operation} ${data.reaction.type} from=${data.from} msg=${data.message_id}`,
-          );
-        }
-      } else if (event.event_type === "message.delivery_status") {
-        logVerbose(`linq delivery: ${(event.data as { status?: string })?.status} msg=${(event.data as { message_id?: string })?.message_id}`);
+        chunks.push(chunk as Buffer);
       }
-    } catch (err) {
-      opts.runtime?.error?.(`linq webhook parse error: ${String(err)}`);
+      const result = await webhookHandler({
+        method: req.method ?? "GET",
+        path: url.pathname,
+        headers: req.headers,
+        body: Buffer.concat(chunks),
+      });
+
+      res.writeHead(result.status, { "Content-Type": "application/json" });
+      res.end(result.body);
+
+      if (!result.event || result.duplicate) {
+        return;
+      }
+
+      try {
+        const event = result.event as LinqWebhookEvent;
+        if (event.event_type === "message.received") {
+          const data = normalizeLinqMessageReceivedData(event.data);
+          if (!data) {
+            logVerbose(`linq webhook ignored malformed message.received event ${event.event_id}`);
+            return;
+          }
+          await inboundDebouncer.enqueue({ event: data });
+        } else if (event.event_type === "reaction.received") {
+          const data = event.data as LinqReactionReceivedData;
+          if (!data.is_from_me && data.reaction) {
+            logVerbose(
+              `linq reaction: ${data.reaction.operation} ${data.reaction.type} from=${data.from} msg=${data.message_id}`,
+            );
+          }
+        } else if (event.event_type === "message.delivery_status") {
+          logVerbose(`linq delivery: ${(event.data as { status?: string })?.status} msg=${(event.data as { message_id?: string })?.message_id}`);
+        }
+      } catch (err) {
+        opts.runtime?.error?.(`linq webhook parse error: ${String(err)}`);
+      }
+    },
+  });
+  activeWebhookPaths.set(webhookPath, accountInfo.accountId);
+  opts.runtime?.info(`linq: registered webhook route ${webhookPath} for account ${accountInfo.accountId}`);
+  await waitUntilAbort(opts.abortSignal, () => {
+    unregister();
+    if (activeWebhookPaths.get(webhookPath) === accountInfo.accountId) {
+      activeWebhookPaths.delete(webhookPath);
     }
   });
-
-  const listenPort = Number(port) || 0;
-  await new Promise<void>((resolve, reject) => {
-    server.listen(listenPort, webhookHost, () => {
-      const addr = server.address();
-      const boundPort = typeof addr === "object" ? addr?.port : listenPort;
-      opts.runtime?.info(`linq: webhook listener started on ${webhookHost}:${boundPort}${webhookPath}`);
-      resolve();
-    });
-    server.on("error", reject);
-  });
-
-  const abort = opts.abortSignal;
-  if (abort) {
-    const onAbort = () => {
-      server.close();
-    };
-    abort.addEventListener("abort", onAbort, { once: true });
-    await new Promise<void>((resolve) => {
-      server.on("close", resolve);
-      if (abort.aborted) {
-        server.close();
-      }
-    });
-    abort.removeEventListener("abort", onAbort);
-  } else {
-    await new Promise<void>((resolve) => {
-      server.on("close", resolve);
-    });
-  }
 }

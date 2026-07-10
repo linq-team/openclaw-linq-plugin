@@ -26,7 +26,7 @@
         "pattern": "^/[A-Za-z0-9/_-]*$",
         "default": "/linq-webhook"
       },
-      "webhookHost": { "type": "string", "minLength": 1, "default": "0.0.0.0" },
+      "webhookHost": { "type": "string", "minLength": 1 },
       "accounts": { "type": "object", "additionalProperties": true },
       "defaultAccount": { "type": "string", "minLength": 1 }
     },
@@ -36,7 +36,7 @@
         "additionalProperties": false,
         "required": ["source", "id"],
         "properties": {
-          "source": { "enum": ["env", "file"] },
+          "source": { "enum": ["env", "file", "exec"] },
           "provider": { "type": "string", "default": "default" },
           "id": { "type": "string", "minLength": 1 }
         }
@@ -70,7 +70,7 @@
             "pattern": "^/[A-Za-z0-9/_-]*$",
             "default": "/linq-webhook"
           },
-          "webhookHost": { "type": "string", "minLength": 1, "default": "0.0.0.0" },
+          "webhookHost": { "type": "string", "minLength": 1 },
           "accounts": { "type": "object", "additionalProperties": true },
           "defaultAccount": { "type": "string", "minLength": 1 }
         },
@@ -80,7 +80,7 @@
             "additionalProperties": false,
             "required": ["source", "id"],
             "properties": {
-              "source": { "enum": ["env", "file"] },
+              "source": { "enum": ["env", "file", "exec"] },
               "provider": { "type": "string", "default": "default" },
               "id": { "type": "string", "minLength": 1 }
             }

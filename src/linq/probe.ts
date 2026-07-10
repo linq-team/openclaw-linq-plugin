@@ -11,7 +11,7 @@ export async function probeLinq(
     return { ok: false, error: "Linq API token not configured" };
   }
 
-  const url = `${LINQ_API_BASE}/phonenumbers`;
+  const url = `${LINQ_API_BASE}/phone_numbers`;
   const controller = new AbortController();
   const timer = timeoutMs && timeoutMs > 0 ? setTimeout(() => controller.abort(), timeoutMs) : null;
 

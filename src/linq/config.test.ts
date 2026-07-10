@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { LinqConfigSchema } from "./config.js";
-import { resolveLinqAccount } from "./accounts.js";
+import { resolveLinqAccount, resolveLinqAccountForStatus } from "./accounts.js";
 
 describe("LinqConfigSchema", () => {
   it("accepts supported SecretRef-backed credentials and applies open dmPolicy by default", () => {
     const parsed = LinqConfigSchema.safeParse({
       apiToken: { source: "env", id: "LINQ_API_TOKEN" },
-      webhookSecret: { source: "file", id: "/tmp/linq-webhook-secret" },
+      webhookSecret: { source: "exec", provider: "vault", id: "linq/webhook-secret" },
       fromPhone: "+15556667777",
     });
 
@@ -17,7 +17,7 @@ describe("LinqConfigSchema", () => {
   it("rejects unsupported SecretRef sources and extra config knobs", () => {
     expect(
       LinqConfigSchema.safeParse({
-        apiToken: { source: "exec", id: "op read token" },
+        apiToken: { source: "literal", id: "op read token" },
       }).success,
     ).toBe(false);
     const invalid = LinqConfigSchema.safeParse({
@@ -61,6 +61,42 @@ describe("resolveLinqAccount", () => {
       tokenSource: "env",
       webhookSecret: "resolved-secret",
       webhookSecretSource: "env",
+      fromPhone: "+15556667777",
+    });
+  });
+
+  it("throws on unresolved exec SecretRefs instead of treating them as missing", () => {
+    expect(() =>
+      resolveLinqAccount({
+        cfg: {
+          channels: {
+            linq: {
+              apiToken: { source: "exec", provider: "vault", id: "linq/token" },
+            },
+          },
+        } as never,
+      }),
+    ).toThrow('channels.linq.apiToken: unresolved SecretRef "exec:vault:linq/token"');
+  });
+
+  it("keeps status resolution readable when SecretRefs are unresolved", () => {
+    const account = resolveLinqAccountForStatus({
+      cfg: {
+        channels: {
+          linq: {
+            apiToken: { source: "env", id: "LINQ_TOKEN_TEST" },
+            webhookSecret: { source: "env", id: "LINQ_WEBHOOK_SECRET_TEST" },
+            fromPhone: "+15556667777",
+          },
+        },
+      } as never,
+    });
+
+    expect(account).toMatchObject({
+      token: "",
+      tokenSource: "none",
+      webhookSecret: "",
+      webhookSecretSource: "none",
       fromPhone: "+15556667777",
     });
   });

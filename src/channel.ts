@@ -18,6 +18,7 @@ import {
   listLinqAccountIds,
   resolveDefaultLinqAccountId,
   resolveLinqAccount,
+  resolveLinqAccountForStatus,
 } from "./linq/accounts.js";
 import { probeLinq } from "./linq/probe.js";
 import { sendMessageLinq } from "./linq/send.js";
@@ -25,6 +26,10 @@ import { parseLinqTarget } from "./linq/targets.js";
 import { monitorLinqProvider } from "./linq/monitor.js";
 import { linqOnboardingAdapter } from "./onboarding.js";
 import { getLinqRuntime } from "./runtime.js";
+import {
+  collectLinqRuntimeConfigAssignments,
+  linqSecretTargetRegistryEntries,
+} from "./linq/secret-contract.js";
 
 const meta = getChatChannelMeta("linq");
 
@@ -54,7 +59,7 @@ export const linqPlugin: ChannelPlugin<ResolvedLinqAccount, LinqProbe> = {
   configSchema: buildChannelConfigSchema(LinqConfigSchema),
   config: {
     listAccountIds: (cfg) => listLinqAccountIds(cfg),
-    resolveAccount: (cfg, accountId) => resolveLinqAccount({ cfg, accountId }),
+    resolveAccount: (cfg, accountId) => resolveLinqAccountForStatus({ cfg, accountId }),
     defaultAccountId: (cfg) => resolveDefaultLinqAccountId(cfg),
     setAccountEnabled: ({ cfg, accountId, enabled }) =>
       setAccountEnabledInConfigSection({
@@ -82,7 +87,9 @@ export const linqPlugin: ChannelPlugin<ResolvedLinqAccount, LinqProbe> = {
       fromPhone: account.fromPhone,
     }),
     resolveAllowFrom: ({ cfg, accountId }) =>
-      (resolveLinqAccount({ cfg, accountId }).config.allowFrom ?? []).map((entry) => String(entry)),
+      (resolveLinqAccountForStatus({ cfg, accountId }).config.allowFrom ?? []).map((entry) =>
+        String(entry),
+      ),
     formatAllowFrom: ({ allowFrom }) =>
       allowFrom.map((entry) => String(entry).trim()).filter(Boolean),
   },
@@ -285,6 +292,10 @@ export const linqPlugin: ChannelPlugin<ResolvedLinqAccount, LinqProbe> = {
       lastInboundAt: runtime?.lastInboundAt ?? null,
       lastOutboundAt: runtime?.lastOutboundAt ?? null,
     }),
+  },
+  secrets: {
+    secretTargetRegistryEntries: linqSecretTargetRegistryEntries,
+    collectRuntimeConfigAssignments: collectLinqRuntimeConfigAssignments,
   },
   gateway: {
     startAccount: async (ctx) => {

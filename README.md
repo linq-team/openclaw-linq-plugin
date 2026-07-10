@@ -13,14 +13,16 @@ openclaw plugins install github:linq-team/openclaw-linq-plugin
 Run the interactive setup wizard:
 
 ```bash
-openclaw channels add --channel linq
+openclaw configure --section channels
 ```
+
+Select **Linq (Messaging API)** from the channel list.
 
 The wizard will walk you through:
 
 1. **API token** — sign up at [linqapp.com](https://linqapp.com) and copy your token from the dashboard
 2. **Phone number** — the Linq phone number shown in your dashboard (E.164 format, e.g. `+15551234567`)
-3. **Webhook config** — URL, path, and host for inbound message delivery (defaults to `http://localhost:3100/linq-webhook`)
+3. **Webhook config** — URL for inbound message delivery; the local route path is derived from the URL path (defaults to `http://localhost:3100/linq-webhook`)
 
 Prefer a SecretRef for credentials. `LINQ_API_TOKEN` is still supported as a default-account setup convenience.
 
@@ -47,8 +49,7 @@ After running the wizard, your `openclaw.json` will contain:
       "fromPhone": "+15551234567",
       "dmPolicy": "open",
       "webhookUrl": "http://localhost:3100/linq-webhook",
-      "webhookPath": "/linq-webhook",
-      "webhookHost": "0.0.0.0"
+      "webhookPath": "/linq-webhook"
     }
   }
 }

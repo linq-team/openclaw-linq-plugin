@@ -3,7 +3,7 @@ import { z } from "zod";
 const e164PhoneSchema = z.string().regex(/^\+[1-9]\d{6,14}$/u, "expected E.164 phone number");
 const allowFromEntrySchema = z.union([z.string().min(1), z.number()]);
 const secretRefSchema = z.object({
-  source: z.enum(["env", "file"]),
+  source: z.enum(["env", "file", "exec"]),
   provider: z.string().min(1).default("default"),
   id: z.string().min(1),
 });
@@ -22,7 +22,7 @@ export const LinqAccountConfigSchema: z.ZodType<Record<string, unknown>> = z.laz
       webhookUrl: z.string().url().optional(),
       webhookSecret: z.union([z.string().min(1), secretRefSchema]).optional(),
       webhookPath: z.string().regex(/^\/[A-Za-z0-9/_-]*$/u).default("/linq-webhook").optional(),
-      webhookHost: z.string().min(1).default("0.0.0.0").optional(),
+      webhookHost: z.string().min(1).optional(),
       accounts: z.record(z.string(), LinqAccountConfigSchema).optional(),
       defaultAccount: z.string().min(1).optional(),
     })
@@ -55,7 +55,7 @@ export const LinqConfigJsonSchema = {
     webhookUrl: { type: "string", format: "uri" },
     webhookSecret: { anyOf: [{ type: "string", minLength: 1 }, { $ref: "#/$defs/secretRef" }] },
     webhookPath: { type: "string", pattern: "^/[A-Za-z0-9/_-]*$", default: "/linq-webhook" },
-    webhookHost: { type: "string", minLength: 1, default: "0.0.0.0" },
+    webhookHost: { type: "string", minLength: 1 },
     accounts: { type: "object", additionalProperties: true },
     defaultAccount: { type: "string", minLength: 1 },
   },
@@ -65,7 +65,7 @@ export const LinqConfigJsonSchema = {
       additionalProperties: false,
       required: ["source", "id"],
       properties: {
-        source: { enum: ["env", "file"] },
+        source: { enum: ["env", "file", "exec"] },
         provider: { type: "string", default: "default" },
         id: { type: "string", minLength: 1 },
       },
