@@ -27,7 +27,7 @@
         "default": "/linq-webhook"
       },
       "webhookHost": { "type": "string", "minLength": 1 },
-      "accounts": { "type": "object", "additionalProperties": true },
+      "accounts": { "type": "object", "additionalProperties": { "$ref": "#" } },
       "defaultAccount": { "type": "string", "minLength": 1 }
     },
     "$defs": {
@@ -71,7 +71,7 @@
             "default": "/linq-webhook"
           },
           "webhookHost": { "type": "string", "minLength": 1 },
-          "accounts": { "type": "object", "additionalProperties": true },
+          "accounts": { "type": "object", "additionalProperties": { "$ref": "#" } },
           "defaultAccount": { "type": "string", "minLength": 1 }
         },
         "$defs": {

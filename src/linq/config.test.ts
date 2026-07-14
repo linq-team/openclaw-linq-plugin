@@ -1,5 +1,6 @@
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
-import { LinqConfigSchema } from "./config.js";
+import { LinqChannelConfigSchema, LinqConfigSchema } from "./config.js";
 import { resolveLinqAccount, resolveLinqAccountForStatus } from "./accounts.js";
 
 describe("LinqConfigSchema", () => {
@@ -25,6 +26,53 @@ describe("LinqConfigSchema", () => {
       webhookMaxBytes: 2048,
     });
     expect(invalid.success).toBe(false);
+  });
+
+  it("exposes matching public JSON-schema and runtime validation", () => {
+    expect(LinqChannelConfigSchema.schema).toMatchObject({
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        accounts: {
+          additionalProperties: { $ref: "#" },
+        },
+      },
+    });
+    expect(
+      LinqChannelConfigSchema.runtime?.safeParse({
+        apiToken: "token",
+        fromPhone: "+15556667777",
+      }),
+    ).toMatchObject({ success: true, data: { dmPolicy: "open" } });
+    expect(
+      LinqChannelConfigSchema.runtime?.safeParse({
+        apiToken: "token",
+        webhookMaxBytes: 2048,
+      }),
+    ).toMatchObject({ success: false });
+    expect(
+      LinqChannelConfigSchema.runtime?.safeParse({
+        accounts: { sales: { apiToken: "token", webhookMaxBytes: 2048 } },
+      }),
+    ).toMatchObject({ success: false });
+  });
+
+  it("keeps manifest channel schemas strict for nested accounts", () => {
+    const manifest = JSON.parse(
+      readFileSync(new URL("../../openclaw.plugin.json", import.meta.url), "utf8"),
+    ) as {
+      configSchema: { properties: { accounts: unknown } };
+      channelConfigs: { linq: { schema: { properties: { accounts: unknown } } } };
+    };
+
+    expect(manifest.configSchema.properties.accounts).toEqual({
+      type: "object",
+      additionalProperties: { $ref: "#" },
+    });
+    expect(manifest.channelConfigs.linq.schema.properties.accounts).toEqual({
+      type: "object",
+      additionalProperties: { $ref: "#" },
+    });
   });
 });
 

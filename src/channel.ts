@@ -4,7 +4,6 @@ import {
   deleteAccountFromConfigSection,
   formatPairingApproveHint,
   getChatChannelMeta,
-  buildChannelConfigSchema,
   migrateBaseNameToDefaultAccount,
   normalizeAccountId,
   setAccountEnabledInConfigSection,
@@ -13,7 +12,7 @@ import {
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
 import type { ResolvedLinqAccount } from "./linq/accounts.js";
 import type { LinqProbe } from "./linq/types.js";
-import { LinqConfigSchema } from "./linq/config.js";
+import { LinqChannelConfigSchema } from "./linq/config.js";
 import {
   listLinqAccountIds,
   resolveDefaultLinqAccountId,
@@ -22,8 +21,10 @@ import {
 } from "./linq/accounts.js";
 import { probeLinq } from "./linq/probe.js";
 import { sendMessageLinq } from "./linq/send.js";
-import { parseLinqTarget } from "./linq/targets.js";
-import { monitorLinqProvider } from "./linq/monitor.js";
+import { formatLinqTarget, parseLinqTarget } from "./linq/targets.js";
+import { monitorLinqProvider } from "./linq/gateway.js";
+import { linqMessageAdapter, toLinqOutboundDeliveryResult } from "./linq/message.js";
+import { resolveLinqOutboundSessionRoute } from "./linq/session-route.js";
 import { linqOnboardingAdapter } from "./onboarding.js";
 import { getLinqRuntime } from "./runtime.js";
 import {
@@ -56,7 +57,7 @@ export const linqPlugin: ChannelPlugin<ResolvedLinqAccount, LinqProbe> = {
     media: true,
   },
   reload: { configPrefixes: ["channels.linq"] },
-  configSchema: buildChannelConfigSchema(LinqConfigSchema),
+  configSchema: LinqChannelConfigSchema,
   config: {
     listAccountIds: (cfg) => listLinqAccountIds(cfg),
     resolveAccount: (cfg, accountId) => resolveLinqAccountForStatus({ cfg, accountId }),
@@ -120,11 +121,12 @@ export const linqPlugin: ChannelPlugin<ResolvedLinqAccount, LinqProbe> = {
         return "";
       }
       try {
-        return parseLinqTarget(raw).raw;
+        return formatLinqTarget(parseLinqTarget(raw));
       } catch {
         return raw;
       }
     },
+    resolveOutboundSessionRoute: (params) => resolveLinqOutboundSessionRoute(params),
     targetResolver: {
       looksLikeId: (id) => {
         try {
@@ -227,7 +229,7 @@ export const linqPlugin: ChannelPlugin<ResolvedLinqAccount, LinqProbe> = {
         accountId: accountId ?? undefined,
         config: cfg,
       });
-      return { channel: "linq", ...result };
+      return toLinqOutboundDeliveryResult(result, "text");
     },
     sendMedia: async ({ to, text, mediaUrl, accountId }) => {
       const cfg = getLinqRuntime().config.current() as OpenClawConfig;
@@ -236,9 +238,10 @@ export const linqPlugin: ChannelPlugin<ResolvedLinqAccount, LinqProbe> = {
         accountId: accountId ?? undefined,
         config: cfg,
       });
-      return { channel: "linq", ...result };
+      return toLinqOutboundDeliveryResult(result, "media");
     },
   },
+  message: linqMessageAdapter,
   status: {
     defaultRuntime: {
       accountId: DEFAULT_ACCOUNT_ID,
