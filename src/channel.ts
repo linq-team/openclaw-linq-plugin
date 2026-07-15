@@ -1,45 +1,19 @@
-import {
-  applyAccountNameToChannelSection,
-  DEFAULT_ACCOUNT_ID,
-  deleteAccountFromConfigSection,
-  formatPairingApproveHint,
-  getChatChannelMeta,
-  buildChannelConfigSchema,
-  migrateBaseNameToDefaultAccount,
-  normalizeAccountId,
-  setAccountEnabledInConfigSection,
-  type ChannelPlugin,
-} from "openclaw/plugin-sdk/core";
+import { DEFAULT_ACCOUNT_ID, type ChannelPlugin } from "openclaw/plugin-sdk/core";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
 import type { ResolvedLinqAccount } from "./linq/accounts.js";
 import type { LinqProbe } from "./linq/types.js";
-import { LinqConfigSchema } from "./linq/config.js";
-import {
-  listLinqAccountIds,
-  resolveDefaultLinqAccountId,
-  resolveLinqAccount,
-  resolveLinqAccountForStatus,
-} from "./linq/accounts.js";
+import { resolveLinqAccount } from "./linq/accounts.js";
 import { probeLinq } from "./linq/probe.js";
 import { sendMessageLinq } from "./linq/send.js";
-import { parseLinqTarget } from "./linq/targets.js";
-import { monitorLinqProvider } from "./linq/monitor.js";
-import { linqOnboardingAdapter } from "./onboarding.js";
+import { formatLinqTarget, parseLinqTarget } from "./linq/targets.js";
+import { monitorLinqProvider } from "./linq/gateway.js";
+import { linqMessageAdapter, toLinqOutboundDeliveryResult } from "./linq/message.js";
+import { resolveLinqOutboundSessionRoute } from "./linq/session-route.js";
 import { getLinqRuntime } from "./runtime.js";
-import {
-  collectLinqRuntimeConfigAssignments,
-  linqSecretTargetRegistryEntries,
-} from "./linq/secret-contract.js";
-
-const meta = getChatChannelMeta("linq");
+import { createLinqPluginBase } from "./channel-base.js";
 
 export const linqPlugin: ChannelPlugin<ResolvedLinqAccount, LinqProbe> = {
-  id: "linq",
-  meta: {
-    ...meta,
-    aliases: ["linq-imessage"],
-  },
-  setupWizard: linqOnboardingAdapter as never,
+  ...createLinqPluginBase(),
   pairing: {
     idLabel: "phoneNumber",
     notifyApproval: async ({ id, accountId, cfg }) => {
@@ -50,81 +24,18 @@ export const linqPlugin: ChannelPlugin<ResolvedLinqAccount, LinqProbe> = {
       });
     },
   },
-  capabilities: {
-    chatTypes: ["direct"],
-    reactions: false,
-    media: true,
-  },
-  reload: { configPrefixes: ["channels.linq"] },
-  configSchema: buildChannelConfigSchema(LinqConfigSchema),
-  config: {
-    listAccountIds: (cfg) => listLinqAccountIds(cfg),
-    resolveAccount: (cfg, accountId) => resolveLinqAccountForStatus({ cfg, accountId }),
-    defaultAccountId: (cfg) => resolveDefaultLinqAccountId(cfg),
-    setAccountEnabled: ({ cfg, accountId, enabled }) =>
-      setAccountEnabledInConfigSection({
-        cfg,
-        sectionKey: "linq",
-        accountId,
-        enabled,
-        allowTopLevel: true,
-      }),
-    deleteAccount: ({ cfg, accountId }) =>
-      deleteAccountFromConfigSection({
-        cfg,
-        sectionKey: "linq",
-        accountId,
-        clearBaseFields: ["apiToken", "tokenFile", "fromPhone", "name"],
-      }),
-    isConfigured: (account) => Boolean(account.token?.trim()),
-    describeAccount: (account) => ({
-      accountId: account.accountId,
-      name: account.name,
-      enabled: account.enabled,
-      configured: Boolean(account.token?.trim()),
-      tokenSource: account.tokenSource,
-      webhookSecretSource: account.webhookSecretSource,
-      fromPhone: account.fromPhone,
-    }),
-    resolveAllowFrom: ({ cfg, accountId }) =>
-      (resolveLinqAccountForStatus({ cfg, accountId }).config.allowFrom ?? []).map((entry) =>
-        String(entry),
-      ),
-    formatAllowFrom: ({ allowFrom }) =>
-      allowFrom.map((entry) => String(entry).trim()).filter(Boolean),
-  },
-  security: {
-    resolveDmPolicy: ({ cfg, accountId, account }) => {
-      const resolvedAccountId = accountId ?? account.accountId ?? DEFAULT_ACCOUNT_ID;
-      const linqSection = (cfg.channels as Record<string, unknown> | undefined)?.linq as
-        | Record<string, unknown>
-        | undefined;
-      const useAccountPath = Boolean(
-        (linqSection?.accounts as Record<string, unknown> | undefined)?.[resolvedAccountId],
-      );
-      const basePath = useAccountPath
-        ? `channels.linq.accounts.${resolvedAccountId}.`
-        : "channels.linq.";
-      return {
-        policy: account.config.dmPolicy ?? "open",
-        allowFrom: account.config.allowFrom ?? [],
-        policyPath: `${basePath}dmPolicy`,
-        allowFromPath: basePath,
-        approveHint: formatPairingApproveHint("linq"),
-      };
-    },
-  },
   messaging: {
     normalizeTarget: (raw: string) => {
       if (!raw) {
         return "";
       }
       try {
-        return parseLinqTarget(raw).raw;
+        return formatLinqTarget(parseLinqTarget(raw));
       } catch {
         return raw;
       }
     },
+    resolveOutboundSessionRoute: (params) => resolveLinqOutboundSessionRoute(params),
     targetResolver: {
       looksLikeId: (id) => {
         try {
@@ -135,85 +46,6 @@ export const linqPlugin: ChannelPlugin<ResolvedLinqAccount, LinqProbe> = {
         }
       },
       hint: "linq:+15556667777 | linq:chat:<chat_id> | linq:<accountId>:+15556667777",
-    },
-  },
-  setup: {
-    resolveAccountId: ({ accountId }) => normalizeAccountId(accountId),
-    applyAccountName: ({ cfg, accountId, name }) =>
-      applyAccountNameToChannelSection({
-        cfg,
-        channelKey: "linq",
-        accountId,
-        name,
-      }),
-    validateInput: ({ accountId, input }) => {
-      if (input.useEnv && accountId !== DEFAULT_ACCOUNT_ID) {
-        return "LINQ_API_TOKEN can only be used for the default account.";
-      }
-      if (!input.useEnv && !input.token && !input.tokenFile) {
-        return "Linq requires an API token or --token-file (or --use-env).";
-      }
-      return null;
-    },
-    applyAccountConfig: ({ cfg, accountId, input }) => {
-      const namedConfig = applyAccountNameToChannelSection({
-        cfg,
-        channelKey: "linq",
-        accountId,
-        name: input.name,
-      });
-      const next =
-        accountId !== DEFAULT_ACCOUNT_ID
-          ? migrateBaseNameToDefaultAccount({ cfg: namedConfig, channelKey: "linq" })
-          : namedConfig;
-      if (accountId === DEFAULT_ACCOUNT_ID) {
-        return {
-          ...next,
-          channels: {
-            ...next.channels,
-            linq: {
-              ...((next.channels as Record<string, unknown> | undefined)?.linq as
-                | Record<string, unknown>
-                | undefined),
-              enabled: true,
-              ...(input.useEnv
-                ? {}
-                : input.tokenFile
-                  ? { tokenFile: input.tokenFile }
-                  : input.token
-                    ? { apiToken: input.token }
-                    : {}),
-            },
-          },
-        };
-      }
-      const linqSection = (next.channels as Record<string, unknown> | undefined)?.linq as
-        | Record<string, unknown>
-        | undefined;
-      return {
-        ...next,
-        channels: {
-          ...next.channels,
-          linq: {
-            ...linqSection,
-            enabled: true,
-            accounts: {
-              ...(linqSection?.accounts as Record<string, unknown> | undefined),
-              [accountId]: {
-                ...((linqSection?.accounts as Record<string, unknown> | undefined)?.[accountId] as
-                  | Record<string, unknown>
-                  | undefined),
-                enabled: true,
-                ...(input.tokenFile
-                  ? { tokenFile: input.tokenFile }
-                  : input.token
-                    ? { apiToken: input.token }
-                    : {}),
-              },
-            },
-          },
-        },
-      };
     },
   },
   outbound: {
@@ -227,7 +59,7 @@ export const linqPlugin: ChannelPlugin<ResolvedLinqAccount, LinqProbe> = {
         accountId: accountId ?? undefined,
         config: cfg,
       });
-      return { channel: "linq", ...result };
+      return toLinqOutboundDeliveryResult(result, "text");
     },
     sendMedia: async ({ to, text, mediaUrl, accountId }) => {
       const cfg = getLinqRuntime().config.current() as OpenClawConfig;
@@ -236,9 +68,10 @@ export const linqPlugin: ChannelPlugin<ResolvedLinqAccount, LinqProbe> = {
         accountId: accountId ?? undefined,
         config: cfg,
       });
-      return { channel: "linq", ...result };
+      return toLinqOutboundDeliveryResult(result, "media");
     },
   },
+  message: linqMessageAdapter,
   status: {
     defaultRuntime: {
       accountId: DEFAULT_ACCOUNT_ID,
@@ -274,8 +107,7 @@ export const linqPlugin: ChannelPlugin<ResolvedLinqAccount, LinqProbe> = {
       probe: snapshot.probe,
       lastProbeAt: snapshot.lastProbeAt ?? null,
     }),
-    probeAccount: async ({ account, timeoutMs }) =>
-      probeLinq(account.token, timeoutMs),
+    probeAccount: async ({ account, timeoutMs }) => probeLinq(account.token, timeoutMs),
     buildAccountSnapshot: ({ account, runtime, probe }) => ({
       accountId: account.accountId,
       name: account.name,
@@ -292,10 +124,6 @@ export const linqPlugin: ChannelPlugin<ResolvedLinqAccount, LinqProbe> = {
       lastInboundAt: runtime?.lastInboundAt ?? null,
       lastOutboundAt: runtime?.lastOutboundAt ?? null,
     }),
-  },
-  secrets: {
-    secretTargetRegistryEntries: linqSecretTargetRegistryEntries,
-    collectRuntimeConfigAssignments: collectLinqRuntimeConfigAssignments,
   },
   gateway: {
     startAccount: async (ctx) => {

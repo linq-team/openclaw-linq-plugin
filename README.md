@@ -22,7 +22,9 @@ The wizard will walk you through:
 
 1. **API token** — sign up at [linqapp.com](https://linqapp.com) and copy your token from the dashboard
 2. **Phone number** — the Linq phone number shown in your dashboard (E.164 format, e.g. `+15551234567`)
-3. **Webhook config** — URL for inbound message delivery; the local route path is derived from the URL path (defaults to `http://localhost:3100/linq-webhook`)
+3. **Local webhook path** — the dedicated path served by the OpenClaw Gateway (defaults to `/linq-webhook`)
+4. **Inbound delivery** — an existing public HTTPS URL, a path-scoped Tailscale Funnel, a Cloudflare Tunnel/reverse proxy, or explicit outbound-only mode
+5. **Readiness summary** — local route, public target, subscription, phone filter, signing-secret state, and the next verification action
 
 Prefer a SecretRef for credentials. `LINQ_API_TOKEN` is still supported as a default-account setup convenience.
 
@@ -48,12 +50,72 @@ After running the wizard, your `openclaw.json` will contain:
       "apiToken": { "source": "env", "id": "LINQ_API_TOKEN" },
       "fromPhone": "+15551234567",
       "dmPolicy": "open",
-      "webhookUrl": "http://localhost:3100/linq-webhook",
+      "webhookUrl": "https://messages.example.com/linq-webhook",
       "webhookPath": "/linq-webhook"
     }
   }
 }
 ```
+
+`webhookUrl` is the stable public HTTPS target registered with Linq. `webhookPath` is the matching route on the local OpenClaw Gateway. Outbound-only configurations omit `webhookUrl` and `webhookSecret`.
+
+### Public ingress
+
+The webhook route is served by the OpenClaw Gateway on `gateway.port` (default `18789`). Publish only the configured `webhookPath`; do not expose the Gateway root or Control UI. Linq requires a stable public HTTPS URL before the wizard will offer to create a subscription.
+
+Start the Gateway before testing ingress:
+
+```bash
+openclaw gateway run
+```
+
+#### Tailscale Funnel
+
+For a Gateway on port `18789`, publish only the Linq path:
+
+```bash
+tailscale funnel --bg --https=443 --set-path=/linq-webhook http://127.0.0.1:18789/linq-webhook
+```
+
+Enter the HTTPS hostname printed by Tailscale with `/linq-webhook` appended. The wizard detects the `tailscale` binary but never installs it or runs Funnel for you. Remove the route with:
+
+```bash
+tailscale funnel --https=443 --set-path=/linq-webhook off
+```
+
+See the [Tailscale Funnel CLI reference](https://tailscale.com/docs/reference/tailscale-cli/funnel) for installation and account requirements.
+
+#### Cloudflare Tunnel
+
+Use a named tunnel with a path matcher and a catch-all `404`; a quick tunnel pointed at the Gateway would expose more than the webhook route.
+
+```yaml
+tunnel: <TUNNEL-UUID>
+credentials-file: <CREDENTIALS-FILE>
+
+ingress:
+  - hostname: messages.example.com
+    path: ^/linq-webhook$
+    service: http://127.0.0.1:18789
+  - service: http_status:404
+```
+
+Validate and run the configuration yourself:
+
+```bash
+cloudflared tunnel --config <CONFIG-PATH> ingress validate
+cloudflared tunnel --config <CONFIG-PATH> run <TUNNEL-NAME>
+```
+
+Stop the foreground process with `Ctrl-C`. If the tunnel was dedicated to a temporary Linq setup, remove it after stopping it and remove its DNS record:
+
+```bash
+cloudflared tunnel delete <TUNNEL-NAME>
+```
+
+See Cloudflare's [configuration-file reference](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/local-management/configuration-file/) for tunnel creation, credentials, DNS routing, and service installation.
+
+Other reverse proxies are supported when the public HTTPS path maps exactly to `http://127.0.0.1:<gateway.port><webhookPath>` and all unrelated paths are rejected.
 
 ### Multi-account
 
@@ -86,7 +148,7 @@ Multiple Linq accounts are supported via the `accounts` field:
 Control who can message your agent:
 
 - `"open"` (default in this version) — anyone can message
-- `"pairing"` — new senders must enter a pairing code once durable pairing setup is enabled
+- `"pairing"` — new senders must complete the OpenClaw pairing flow
 - `"disabled"` — no inbound DMs
 
 ### Webhook security
