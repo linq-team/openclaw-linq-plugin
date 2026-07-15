@@ -11,11 +11,11 @@ import {
   normalizeAccountId,
   addWildcardAllowFrom,
   promptAccountId,
+  runSingleChannelSecretStep,
 } from "openclaw/plugin-sdk/setup";
 import {
   listLinqAccountIds,
   resolveDefaultLinqAccountId,
-  resolveLinqAccount,
   resolveLinqAccountForStatus,
 } from "./linq/accounts.js";
 import { probeLinq } from "./linq/probe.js";
@@ -198,10 +198,14 @@ export const linqOnboardingAdapter: ChannelOnboardingAdapter = {
   configure: async ({
     cfg,
     prompter,
+    options,
     accountOverrides,
     shouldPromptAccountIds,
     forceAllowFrom,
   }) => {
+    const beforePersistentEffect = (
+      options as (typeof options & { beforePersistentEffect?: () => Promise<void> }) | undefined
+    )?.beforePersistentEffect;
     const linqOverride = accountOverrides.linq?.trim();
     const defaultLinqAccountId = resolveDefaultLinqAccountId(cfg);
     let linqAccountId = linqOverride ? normalizeAccountId(linqOverride) : defaultLinqAccountId;
@@ -217,93 +221,80 @@ export const linqOnboardingAdapter: ChannelOnboardingAdapter = {
     }
 
     let next = cfg;
-    const resolvedAccount = resolveLinqAccount({
+    const resolvedAccount = resolveLinqAccountForStatus({
       cfg: next,
       accountId: linqAccountId,
     });
-    const accountConfigured = Boolean(resolvedAccount.token);
     const allowEnv = linqAccountId === DEFAULT_ACCOUNT_ID;
-    const canUseEnv = allowEnv && Boolean(process.env.LINQ_API_TOKEN?.trim());
     const hasConfigToken = Boolean(
       resolvedAccount.config.apiToken || resolvedAccount.config.tokenFile,
     );
-
-    let token: string | null = null;
-    if (!accountConfigured) {
-      await noteLinqTokenHelp(prompter);
-    }
-    if (canUseEnv && !resolvedAccount.config.apiToken) {
-      const keepEnv = await prompter.confirm({
-        message: "LINQ_API_TOKEN detected. Use env var?",
-        initialValue: true,
-      });
-      if (keepEnv) {
-        next = {
-          ...next,
-          channels: {
-            ...next.channels,
-            linq: {
-              ...next.channels?.linq,
-              enabled: true,
-            },
-          },
-        };
-      } else {
-        token = String(
-          await prompter.text({
-            message: "Enter Linq API token",
-            validate: (value) => (value?.trim() ? undefined : "Required"),
+    const tokenStep = await runSingleChannelSecretStep({
+      cfg: next,
+      prompter: {
+        confirm: prompter.confirm,
+        select: prompter.select,
+        note: prompter.note,
+        text: (params) =>
+          prompter.text({
+            ...params,
+            ...(params.message === "Enter Linq API token" ? { sensitive: true } : {}),
           }),
-        ).trim();
-      }
-    } else if (hasConfigToken) {
-      const keep = await prompter.confirm({
-        message: "Linq token already configured. Keep it?",
-        initialValue: true,
-      });
-      if (!keep) {
-        token = String(
-          await prompter.text({
-            message: "Enter Linq API token",
-            validate: (value) => (value?.trim() ? undefined : "Required"),
-          }),
-        ).trim();
-      }
-    } else {
-      token = String(
-        await prompter.text({
-          message: "Enter Linq API token",
-          validate: (value) => (value?.trim() ? undefined : "Required"),
-        }),
-      ).trim();
-    }
-
-    if (token) {
-      next = setLinqAccountPatch(next, linqAccountId, { enabled: true, apiToken: token });
-    }
+      },
+      providerHint: channel,
+      credentialLabel: "Linq API token",
+      secretInputMode: options?.secretInputMode,
+      accountConfigured: Boolean(resolvedAccount.token) || hasConfigToken,
+      hasConfigToken,
+      allowEnv,
+      envValue: allowEnv ? process.env.LINQ_API_TOKEN?.trim() : undefined,
+      envPrompt: "LINQ_API_TOKEN detected. Use env var?",
+      keepPrompt: "Linq token already configured. Keep it?",
+      inputPrompt: "Enter Linq API token",
+      preferredEnvVar: "LINQ_API_TOKEN",
+      onMissingConfigured: async () => await noteLinqTokenHelp(prompter),
+      applyUseEnv: (currentCfg) =>
+        setLinqAccountPatch(currentCfg, linqAccountId, { enabled: true }),
+      applySet: (currentCfg, value) => {
+        const cleared = clearLinqAccountFields(currentCfg, linqAccountId, ["tokenFile"]);
+        return setLinqAccountPatch(cleared, linqAccountId, {
+          enabled: true,
+          apiToken: value,
+        });
+      },
+    });
+    next = tokenStep.cfg;
 
     // --- fromPhone ---
-    const accountAfterToken = resolveLinqAccount({ cfg: next, accountId: linqAccountId });
+    const accountAfterToken = resolveLinqAccountForStatus({
+      cfg: next,
+      accountId: linqAccountId,
+    });
+    const tokenForSetup = tokenStep.resolvedValue ?? accountAfterToken.token;
     const previousFromPhone = accountAfterToken.fromPhone;
     const fromPhone = await selectLinqPhone({
       prompter,
-      token: accountAfterToken.token,
+      token: tokenForSetup,
       existingPhone: accountAfterToken.fromPhone,
     });
 
     next = setLinqAccountPatch(next, linqAccountId, { fromPhone });
 
     // --- Public webhook ingress ---
-    const accountBeforeWebhook = resolveLinqAccount({ cfg: next, accountId: linqAccountId });
+    const accountBeforeWebhook = resolveLinqAccountForStatus({
+      cfg: next,
+      accountId: linqAccountId,
+    });
     const webhookResult = await configureLinqWebhookOnboarding({
       prompter,
-      token: accountBeforeWebhook.token,
+      token: tokenForSetup,
       fromPhone,
       previousFromPhone,
       existingWebhookUrl: accountBeforeWebhook.config.webhookUrl,
       existingWebhookPath: accountBeforeWebhook.config.webhookPath,
       hasWebhookSecret: Boolean(accountBeforeWebhook.webhookSecret),
       gatewayPort: resolveGatewayPort(next),
+      beforePersistentEffect,
     });
     if (webhookResult.mode === "inbound") {
       next = setLinqAccountPatch(next, linqAccountId, {

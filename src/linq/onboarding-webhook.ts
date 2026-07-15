@@ -26,6 +26,23 @@ type LinqSubscriptionSetupResult = {
   clearSigningSecret?: boolean;
 };
 
+class PersistentEffectGuardError extends Error {
+  constructor(readonly originalError: unknown) {
+    super("Linq setup persistent-effect guard failed");
+    this.name = "PersistentEffectGuardError";
+  }
+}
+
+async function guardPersistentEffect(
+  beforePersistentEffect: (() => Promise<void>) | undefined,
+): Promise<void> {
+  try {
+    await beforePersistentEffect?.();
+  } catch (err) {
+    throw new PersistentEffectGuardError(err);
+  }
+}
+
 export type LinqWebhookOnboardingResult =
   | {
       mode: "inbound";
@@ -45,6 +62,7 @@ async function setupLinqWebhookSubscription(params: {
   fromPhone: string;
   previousFromPhone?: string;
   hasWebhookSecret: boolean;
+  beforePersistentEffect?: () => Promise<void>;
 }): Promise<LinqSubscriptionSetupResult> {
   const {
     prompter,
@@ -89,6 +107,7 @@ async function setupLinqWebhookSubscription(params: {
           subscription: existing,
         };
       }
+      await guardPersistentEffect(params.beforePersistentEffect);
       await deleteLinqWebhookSubscription({ token, subscriptionId: existing.id });
       clearSigningSecret = true;
     }
@@ -111,6 +130,7 @@ async function setupLinqWebhookSubscription(params: {
         };
       }
       for (const subscription of replaceable) {
+        await guardPersistentEffect(params.beforePersistentEffect);
         await deleteLinqWebhookSubscription({ token, subscriptionId: subscription.id });
         if (subscription.target_url === previousWebhookUrl) {
           clearSigningSecret = true;
@@ -129,6 +149,7 @@ async function setupLinqWebhookSubscription(params: {
         ...(clearSigningSecret ? { clearSigningSecret: true } : {}),
       };
     }
+    await guardPersistentEffect(params.beforePersistentEffect);
     const subscription = await createLinqWebhookSubscription({
       token,
       targetUrl: webhookUrl,
@@ -151,6 +172,9 @@ async function setupLinqWebhookSubscription(params: {
       signingSecret,
     };
   } catch (err) {
+    if (err instanceof PersistentEffectGuardError) {
+      throw err.originalError;
+    }
     await prompter.note(
       `Could not configure Linq webhook subscription: ${String(err)}`,
       "Linq webhook",
@@ -246,6 +270,7 @@ async function disableExistingInbound(params: {
   token: string;
   webhookUrl?: string;
   fromPhone: string;
+  beforePersistentEffect?: () => Promise<void>;
 }): Promise<{ disabled: boolean; detail: string }> {
   const webhookUrl = params.webhookUrl?.trim();
   if (!webhookUrl || !params.token.trim()) {
@@ -271,9 +296,13 @@ async function disableExistingInbound(params: {
           "Existing inbound configuration was preserved because subscription deletion was declined.",
       };
     }
+    await guardPersistentEffect(params.beforePersistentEffect);
     await deleteLinqWebhookSubscription({ token: params.token, subscriptionId: existing.id });
     return { disabled: true, detail: `Deleted subscription ${existing.id}.` };
   } catch (err) {
+    if (err instanceof PersistentEffectGuardError) {
+      throw err.originalError;
+    }
     await params.prompter.note(
       `Could not disable the existing Linq subscription: ${String(err)}`,
       "Linq outbound-only setup",
@@ -344,6 +373,7 @@ export async function configureLinqWebhookOnboarding(params: {
   existingWebhookPath?: string;
   hasWebhookSecret: boolean;
   gatewayPort: number;
+  beforePersistentEffect?: () => Promise<void>;
 }): Promise<LinqWebhookOnboardingResult> {
   const previousWebhookUrl = params.existingWebhookUrl?.trim();
   const existingWebhookPath = resolveConfiguredWebhookPath({
@@ -375,6 +405,7 @@ export async function configureLinqWebhookOnboarding(params: {
       token: params.token,
       webhookUrl: previousWebhookUrl,
       fromPhone: params.fromPhone,
+      beforePersistentEffect: params.beforePersistentEffect,
     });
     if (!outbound.disabled) {
       await params.prompter.note(
@@ -412,6 +443,7 @@ export async function configureLinqWebhookOnboarding(params: {
     fromPhone: params.fromPhone,
     previousFromPhone: params.previousFromPhone,
     hasWebhookSecret: params.hasWebhookSecret,
+    beforePersistentEffect: params.beforePersistentEffect,
   });
   await noteLinqWebhookSummary({
     prompter: params.prompter,

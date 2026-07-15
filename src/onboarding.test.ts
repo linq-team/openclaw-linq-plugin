@@ -10,19 +10,40 @@ function createPrompter(params: {
   webhookPath?: string;
   webhookUrl?: string;
   confirm?: (message: string) => boolean;
+  tokenInput?: string;
+  secretInputMode?: "plaintext" | "ref";
+  secretEnvVar?: string;
 }) {
   const notes: Array<{ message: string; title?: string }> = [];
   const textMessages: string[] = [];
+  const textPrompts: Array<{ message: string; sensitive?: boolean }> = [];
   const prompter = {
     note: vi.fn(async (message: string, title?: string) => {
       notes.push({ message, title });
     }),
     confirm: vi.fn(async ({ message }: { message: string }) => params.confirm?.(message) ?? true),
     select: vi.fn(async ({ message }: { message: string }) => {
-      return message === "Linq sender phone number" ? phone : params.ingressMode;
+      if (message === "Linq sender phone number") {
+        return phone;
+      }
+      if (message.startsWith("How do you want to provide")) {
+        return params.secretInputMode ?? "plaintext";
+      }
+      if (message.startsWith("Where is this Linq API token stored?")) {
+        return "env";
+      }
+      return params.ingressMode;
     }),
-    text: vi.fn(async ({ message }: { message: string }) => {
+    text: vi.fn(async (prompt: { message: string; sensitive?: boolean }) => {
+      const { message } = prompt;
       textMessages.push(message);
+      textPrompts.push(prompt);
+      if (message === "Enter Linq API token") {
+        return params.tokenInput ?? "test-token";
+      }
+      if (message === "Environment variable name") {
+        return params.secretEnvVar ?? "LINQ_API_TOKEN";
+      }
       if (message === "Local webhook path") {
         return params.webhookPath ?? "/linq-webhook";
       }
@@ -32,7 +53,7 @@ function createPrompter(params: {
       throw new Error(`Unexpected text prompt: ${message}`);
     }),
   } as unknown as WizardPrompter;
-  return { prompter, notes, textMessages };
+  return { prompter, notes, textMessages, textPrompts };
 }
 
 function configuredAccount(overrides: Record<string, unknown> = {}): OpenClawConfig {
@@ -84,10 +105,12 @@ function stubPhoneProbeAndSubscriptionCreation() {
 describe("Linq onboarding wizard", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    delete process.env.LINQ_TOKEN_REF_TEST;
   });
 
   it("creates a ready, path-scoped inbound configuration", async () => {
     const fetchMock = stubPhoneProbeAndSubscriptionCreation();
+    const beforePersistentEffect = vi.fn(async () => {});
     const { prompter, notes } = createPrompter({
       ingressMode: "cloudflare",
       webhookPath: "/hooks/linq",
@@ -98,6 +121,7 @@ describe("Linq onboarding wizard", () => {
       cfg: configuredAccount(),
       prompter,
       runtime: {} as never,
+      options: { beforePersistentEffect } as never,
       accountOverrides: {},
       shouldPromptAccountIds: false,
       forceAllowFrom: false,
@@ -107,6 +131,12 @@ describe("Linq onboarding wizard", () => {
     expect(linq.webhookPath).toBe("/hooks/linq");
     expect(linq.webhookUrl).toBe("https://messages.example.com/hooks/linq");
     expect(linq.webhookSecret).toBe("signing-secret");
+    expect(beforePersistentEffect).toHaveBeenCalledTimes(1);
+    const createCallIndex = fetchMock.mock.calls.findIndex(([, init]) => init?.method === "POST");
+    expect(createCallIndex).toBeGreaterThanOrEqual(0);
+    expect(beforePersistentEffect.mock.invocationCallOrder[0]).toBeLessThan(
+      fetchMock.mock.invocationCallOrder[createCallIndex]!,
+    );
     expect(fetchMock).toHaveBeenCalledWith(
       "https://api.linqapp.com/api/partner/v3/webhook-subscriptions",
       expect.objectContaining({
@@ -127,6 +157,86 @@ describe("Linq onboarding wizard", () => {
           note.message.includes("Inbound readiness: READY"),
       ),
     ).toBe(true);
+  });
+
+  it("masks plaintext API-token input", async () => {
+    stubPhoneProbeAndSubscriptionCreation();
+    const { prompter, textPrompts } = createPrompter({
+      ingressMode: "existing",
+      secretInputMode: "plaintext",
+      webhookPath: "/hooks/linq",
+      webhookUrl: "https://messages.example.com/hooks/linq",
+    });
+
+    const result = await linqOnboardingAdapter.configure({
+      cfg: configuredAccount({ apiToken: undefined }),
+      prompter,
+      runtime: {} as never,
+      options: { secretInputMode: "plaintext" },
+      accountOverrides: {},
+      shouldPromptAccountIds: false,
+      forceAllowFrom: false,
+    });
+
+    expect((result.cfg.channels?.linq as Record<string, unknown>).apiToken).toBe("test-token");
+    expect(textPrompts).toContainEqual(
+      expect.objectContaining({ message: "Enter Linq API token", sensitive: true }),
+    );
+  });
+
+  it("stores an API-token SecretRef while using its resolved value for setup", async () => {
+    process.env.LINQ_TOKEN_REF_TEST = "test-token";
+    stubPhoneProbeAndSubscriptionCreation();
+    const { prompter } = createPrompter({
+      ingressMode: "existing",
+      secretInputMode: "ref",
+      secretEnvVar: "LINQ_TOKEN_REF_TEST",
+      webhookPath: "/hooks/linq",
+      webhookUrl: "https://messages.example.com/hooks/linq",
+    });
+
+    const result = await linqOnboardingAdapter.configure({
+      cfg: configuredAccount({ apiToken: undefined }),
+      prompter,
+      runtime: {} as never,
+      options: { secretInputMode: "ref" },
+      accountOverrides: {},
+      shouldPromptAccountIds: false,
+      forceAllowFrom: false,
+    });
+
+    expect((result.cfg.channels?.linq as Record<string, unknown>).apiToken).toEqual({
+      source: "env",
+      provider: "default",
+      id: "LINQ_TOKEN_REF_TEST",
+    });
+  });
+
+  it("propagates a persistent-effect guard failure before subscription creation", async () => {
+    const guardError = new Error("setup authority changed");
+    const beforePersistentEffect = vi.fn(async () => {
+      throw guardError;
+    });
+    const fetchMock = stubPhoneProbeAndSubscriptionCreation();
+    const { prompter } = createPrompter({
+      ingressMode: "existing",
+      webhookPath: "/hooks/linq",
+      webhookUrl: "https://messages.example.com/hooks/linq",
+    });
+
+    await expect(
+      linqOnboardingAdapter.configure({
+        cfg: configuredAccount(),
+        prompter,
+        runtime: {} as never,
+        options: { beforePersistentEffect } as never,
+        accountOverrides: {},
+        shouldPromptAccountIds: false,
+        forceAllowFrom: false,
+      }),
+    ).rejects.toBe(guardError);
+    expect(beforePersistentEffect).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
   });
 
   it("makes outbound-only explicit without storing a fake webhook URL", async () => {
@@ -162,6 +272,63 @@ describe("Linq onboarding wizard", () => {
       true,
     );
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("guards provider deletion when switching existing inbound setup to outbound-only", async () => {
+    const beforePersistentEffect = vi.fn(async () => {});
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/phone_numbers")) {
+        return new Response(JSON.stringify({ phone_numbers: [{ phone_number: phone }] }), {
+          status: 200,
+        });
+      }
+      if (url.endsWith("/webhook-subscriptions/sub_existing") && init?.method === "DELETE") {
+        return new Response(null, { status: 204 });
+      }
+      if (url.endsWith("/webhook-subscriptions")) {
+        return new Response(
+          JSON.stringify({
+            subscriptions: [
+              {
+                id: "sub_existing",
+                is_active: true,
+                subscribed_events: ["message.received"],
+                target_url: "https://messages.example.com/linq-webhook",
+                phone_numbers: [phone],
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { prompter } = createPrompter({ ingressMode: "outbound-only" });
+
+    const result = await linqOnboardingAdapter.configure({
+      cfg: configuredAccount({
+        webhookUrl: "https://messages.example.com/linq-webhook",
+        webhookPath: "/linq-webhook",
+        webhookSecret: "existing-secret",
+      }),
+      prompter,
+      runtime: {} as never,
+      options: { beforePersistentEffect } as never,
+      accountOverrides: {},
+      shouldPromptAccountIds: false,
+      forceAllowFrom: false,
+    });
+    const linq = result.cfg.channels?.linq as Record<string, unknown>;
+    const deleteCallIndex = fetchMock.mock.calls.findIndex(([, init]) => init?.method === "DELETE");
+
+    expect(linq).not.toHaveProperty("webhookUrl");
+    expect(beforePersistentEffect).toHaveBeenCalledTimes(1);
+    expect(deleteCallIndex).toBeGreaterThanOrEqual(0);
+    expect(beforePersistentEffect.mock.invocationCallOrder[0]).toBeLessThan(
+      fetchMock.mock.invocationCallOrder[deleteCallIndex]!,
+    );
   });
 
   it("stores named-account ingress under that account", async () => {
