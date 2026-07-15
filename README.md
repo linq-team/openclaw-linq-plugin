@@ -1,6 +1,6 @@
-# openclaw-linq-plugin
+# OpenClaw iMessage Integration & Setup
 
-Linq iMessage channel plugin for [OpenClaw](https://github.com/openclaw/openclaw). Send and receive real iMessage (blue bubbles) through the [Linq API](https://linqapp.com) — no Mac required.
+Linq [OpenClaw](https://github.com/openclaw/openclaw) iMessage plugin. Send and receive real iMessages (blue bubbles) through the [Linq iMessage API](https://linqapp.com), with no Mac required. Get setup in minutes.
 
 ## Installation
 
@@ -8,7 +8,7 @@ Linq iMessage channel plugin for [OpenClaw](https://github.com/openclaw/openclaw
 openclaw plugins install github:linq-team/openclaw-linq-plugin
 ```
 
-## Setup
+## OpenClaw iMessage Plugin Setup
 
 Run the interactive setup wizard:
 
