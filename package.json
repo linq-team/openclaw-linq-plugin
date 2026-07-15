@@ -24,7 +24,7 @@
     "messaging"
   ],
   "peerDependencies": {
-    "openclaw": ">=2026.6.0"
+    "openclaw": ">=2026.6.1"
   },
   "dependencies": {
     "zod": "^4.4.3"
