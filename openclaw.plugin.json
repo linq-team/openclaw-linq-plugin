@@ -17,13 +17,13 @@
         "type": "array",
         "items": { "anyOf": [{ "type": "string" }, { "type": "number" }] }
       },
-      "webhookUrl": { "type": "string", "format": "uri" },
+      "webhookUrl": { "type": "string", "format": "uri", "pattern": "^https://" },
       "webhookSecret": {
         "anyOf": [{ "type": "string", "minLength": 1 }, { "$ref": "#/$defs/secretRef" }]
       },
       "webhookPath": {
         "type": "string",
-        "pattern": "^/[A-Za-z0-9/_-]*$",
+        "pattern": "^/[A-Za-z0-9/_-]+$",
         "default": "/linq-webhook"
       },
       "webhookHost": { "type": "string", "minLength": 1 },
@@ -61,13 +61,13 @@
             "type": "array",
             "items": { "anyOf": [{ "type": "string" }, { "type": "number" }] }
           },
-          "webhookUrl": { "type": "string", "format": "uri" },
+          "webhookUrl": { "type": "string", "format": "uri", "pattern": "^https://" },
           "webhookSecret": {
             "anyOf": [{ "type": "string", "minLength": 1 }, { "$ref": "#/$defs/secretRef" }]
           },
           "webhookPath": {
             "type": "string",
-            "pattern": "^/[A-Za-z0-9/_-]*$",
+            "pattern": "^/[A-Za-z0-9/_-]+$",
             "default": "/linq-webhook"
           },
           "webhookHost": { "type": "string", "minLength": 1 },

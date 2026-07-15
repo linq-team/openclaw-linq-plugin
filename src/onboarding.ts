@@ -1,4 +1,5 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
+import { resolveGatewayPort } from "openclaw/plugin-sdk/core";
 import type {
   ChannelSetupWizardAdapter as ChannelOnboardingAdapter,
   ChannelSetupDmPolicy as ChannelOnboardingDmPolicy,
@@ -18,49 +19,9 @@ import {
   resolveLinqAccountForStatus,
 } from "./linq/accounts.js";
 import { probeLinq } from "./linq/probe.js";
-import {
-  createLinqWebhookSubscription,
-  deleteLinqWebhookSubscription,
-  findLinqWebhookSubscription,
-  findReplaceableLinqWebhookSubscriptions,
-  listLinqWebhookSubscriptions,
-} from "./linq/subscriptions.js";
+import { configureLinqWebhookOnboarding } from "./linq/onboarding-webhook.js";
 
 const channel = "linq" as const;
-const webhookPathPattern = /^\/[A-Za-z0-9/_-]*$/u;
-
-function validateWebhookPath(value: string | undefined): string | undefined {
-  const trimmed = value?.trim() ?? "";
-  if (!trimmed) {
-    return "Required";
-  }
-  return webhookPathPattern.test(trimmed)
-    ? undefined
-    : "Use a path like /linq-webhook with letters, numbers, _, -, or /.";
-}
-
-function parseWebhookUrl(value: string | undefined): URL | null {
-  const trimmed = value?.trim() ?? "";
-  if (!trimmed) {
-    return null;
-  }
-  try {
-    return new URL(trimmed);
-  } catch {
-    return null;
-  }
-}
-
-function validateWebhookUrl(value: string | undefined): string | undefined {
-  const url = parseWebhookUrl(value);
-  if (!url) {
-    return "Enter a valid URL.";
-  }
-  if (url.pathname === "/") {
-    return "Include a webhook path, for example /linq-webhook.";
-  }
-  return validateWebhookPath(url.pathname);
-}
 
 function setLinqAccountPatch(
   cfg: OpenClawConfig,
@@ -92,6 +53,42 @@ function setLinqAccountPatch(
             ...cfg.channels?.linq?.accounts?.[accountId],
             ...patch,
           },
+        },
+      },
+    },
+  };
+}
+
+function clearLinqAccountFields(
+  cfg: OpenClawConfig,
+  accountId: string,
+  fields: readonly string[],
+): OpenClawConfig {
+  const clear = (value: unknown): Record<string, unknown> => {
+    const next = { ...(value as Record<string, unknown> | undefined) };
+    for (const field of fields) {
+      delete next[field];
+    }
+    return next;
+  };
+  if (accountId === DEFAULT_ACCOUNT_ID) {
+    return {
+      ...cfg,
+      channels: {
+        ...cfg.channels,
+        linq: clear(cfg.channels?.linq),
+      },
+    };
+  }
+  return {
+    ...cfg,
+    channels: {
+      ...cfg.channels,
+      linq: {
+        ...cfg.channels?.linq,
+        accounts: {
+          ...cfg.channels?.linq?.accounts,
+          [accountId]: clear(cfg.channels?.linq?.accounts?.[accountId]),
         },
       },
     },
@@ -171,111 +168,6 @@ async function selectLinqPhone(params: {
       validate: (value) => (value?.trim() ? undefined : "Required"),
     }),
   ).trim();
-}
-
-async function maybeCreateLinqWebhookSubscription(params: {
-  prompter: WizardPrompter;
-  token: string;
-  webhookUrl: string;
-  previousWebhookUrl?: string;
-  fromPhone: string;
-  previousFromPhone?: string;
-  hasWebhookSecret: boolean;
-}): Promise<string | null> {
-  const {
-    prompter,
-    token,
-    webhookUrl,
-    previousWebhookUrl,
-    fromPhone,
-    previousFromPhone,
-    hasWebhookSecret,
-  } = params;
-  if (!token?.trim()) {
-    return null;
-  }
-  try {
-    const subscriptions = await listLinqWebhookSubscriptions(token);
-    const parsedWebhookUrl = parseWebhookUrl(webhookUrl);
-    const isPublicHttps = parsedWebhookUrl?.protocol === "https:";
-    const existing = findLinqWebhookSubscription(subscriptions, webhookUrl, fromPhone);
-    if (existing) {
-      await prompter.note(
-        `Found Linq webhook subscription ${existing.id} for ${webhookUrl}.`,
-        "Linq webhook",
-      );
-      if (hasWebhookSecret) {
-        return null;
-      }
-      if (!isPublicHttps) {
-        await prompter.note(
-          "Skipping Linq webhook subscription recreation because the webhook URL is not HTTPS.",
-          "Linq webhook",
-        );
-        return null;
-      }
-      const recreateForSecret = await prompter.confirm({
-        message: "Recreate the existing Linq webhook subscription to store its signing secret?",
-        initialValue: true,
-      });
-      if (!recreateForSecret) {
-        await prompter.note(
-          "Linq only returns the signing secret when creating a subscription. Delete/recreate the subscription or enter the secret manually if inbound signatures fail.",
-          "Linq webhook secret",
-        );
-        return null;
-      }
-      await deleteLinqWebhookSubscription({ token, subscriptionId: existing.id });
-    }
-
-    if (!isPublicHttps) {
-      await prompter.note(
-        "Skipping Linq webhook subscription creation because the webhook URL is not HTTPS.",
-        "Linq webhook",
-      );
-      return null;
-    }
-
-    const replaceable = findReplaceableLinqWebhookSubscriptions(subscriptions, {
-      targetUrl: webhookUrl,
-      phoneNumber: fromPhone,
-      previousTargetUrl: previousWebhookUrl,
-      previousPhoneNumber: previousFromPhone,
-    });
-    if (replaceable.length > 0) {
-      const replace = await prompter.confirm({
-        message: `Replace ${replaceable.length} stale Linq webhook subscription${replaceable.length === 1 ? "" : "s"} before creating the current one?`,
-        initialValue: true,
-      });
-      if (!replace) {
-        return null;
-      }
-      for (const subscription of replaceable) {
-        await deleteLinqWebhookSubscription({ token, subscriptionId: subscription.id });
-      }
-    }
-
-    const create = await prompter.confirm({
-      message: "Create Linq webhook subscription for inbound messages?",
-      initialValue: true,
-    });
-    if (!create) {
-      return null;
-    }
-    const subscription = await createLinqWebhookSubscription({
-      token,
-      targetUrl: webhookUrl,
-      phoneNumber: fromPhone,
-    });
-    await prompter.note(`Created Linq webhook subscription ${subscription.id}.`, "Linq webhook");
-    return subscription.signing_secret?.trim() || null;
-  } catch (err) {
-    await prompter.note(
-      `Could not configure Linq webhook subscription: ${String(err)}`,
-      "Linq webhook",
-    );
-    return null;
-  }
 }
 
 const dmPolicy: ChannelOnboardingDmPolicy = {
@@ -401,49 +293,32 @@ export const linqOnboardingAdapter: ChannelOnboardingAdapter = {
 
     next = setLinqAccountPatch(next, linqAccountId, { fromPhone });
 
-    // --- Webhook config ---
-    const linqSection = (next.channels as Record<string, unknown> | undefined)?.linq as
-      | Record<string, unknown>
-      | undefined;
-    const existingWebhookPath = (linqSection?.webhookPath as string) ?? "/linq-webhook";
-    const existingWebhookUrl =
-      (linqSection?.webhookUrl as string) ?? `http://localhost:3100${existingWebhookPath}`;
-    const previousWebhookUrl =
-      typeof linqSection?.webhookUrl === "string" ? linqSection.webhookUrl : undefined;
-    const webhookUrl = String(
-      await prompter.text({
-        message: "Webhook URL",
-        initialValue: existingWebhookUrl,
-        validate: validateWebhookUrl,
-      }),
-    ).trim();
-
-    const webhookPath = parseWebhookUrl(webhookUrl)?.pathname ?? existingWebhookPath;
-
-    next = {
-      ...next,
-      channels: {
-        ...next.channels,
-        linq: {
-          ...next.channels?.linq,
-          webhookUrl,
-          webhookPath,
-        },
-      },
-    };
-
-    const accountAfterWebhook = resolveLinqAccount({ cfg: next, accountId: linqAccountId });
-    const webhookSecret = await maybeCreateLinqWebhookSubscription({
+    // --- Public webhook ingress ---
+    const accountBeforeWebhook = resolveLinqAccount({ cfg: next, accountId: linqAccountId });
+    const webhookResult = await configureLinqWebhookOnboarding({
       prompter,
-      token: accountAfterWebhook.token,
-      webhookUrl,
-      previousWebhookUrl,
+      token: accountBeforeWebhook.token,
       fromPhone,
       previousFromPhone,
-      hasWebhookSecret: Boolean(accountAfterWebhook.webhookSecret),
+      existingWebhookUrl: accountBeforeWebhook.config.webhookUrl,
+      existingWebhookPath: accountBeforeWebhook.config.webhookPath,
+      hasWebhookSecret: Boolean(accountBeforeWebhook.webhookSecret),
+      gatewayPort: resolveGatewayPort(next),
     });
-    if (webhookSecret) {
-      next = setLinqAccountPatch(next, linqAccountId, { webhookSecret });
+    if (webhookResult.mode === "inbound") {
+      next = setLinqAccountPatch(next, linqAccountId, {
+        webhookUrl: webhookResult.webhookUrl,
+        webhookPath: webhookResult.webhookPath,
+        ...(webhookResult.signingSecret ? { webhookSecret: webhookResult.signingSecret } : {}),
+      });
+      if (webhookResult.clearSigningSecret) {
+        next = clearLinqAccountFields(next, linqAccountId, ["webhookSecret"]);
+      }
+    } else if (webhookResult.mode === "outbound-only") {
+      next = setLinqAccountPatch(next, linqAccountId, {
+        webhookPath: webhookResult.webhookPath,
+      });
+      next = clearLinqAccountFields(next, linqAccountId, ["webhookUrl", "webhookSecret"]);
     }
 
     if (!next.channels?.linq?.dmPolicy) {

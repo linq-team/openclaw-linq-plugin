@@ -2,6 +2,13 @@ import { z } from "zod";
 import { buildJsonChannelConfigSchema } from "openclaw/plugin-sdk/channel-config-schema";
 
 const e164PhoneSchema = z.string().regex(/^\+[1-9]\d{6,14}$/u, "expected E.164 phone number");
+const publicWebhookUrlSchema = z
+  .string()
+  .url()
+  .refine((value) => value.startsWith("https://"), "expected public HTTPS webhook URL");
+const webhookPathSchema = z
+  .string()
+  .regex(/^\/[A-Za-z0-9/_-]+$/u, "expected dedicated webhook path");
 const allowFromEntrySchema = z.union([z.string().min(1), z.number()]);
 const secretRefSchema = z.object({
   source: z.enum(["env", "file", "exec"]),
@@ -20,9 +27,9 @@ export const LinqAccountConfigSchema: z.ZodType<Record<string, unknown>> = z.laz
       // TODO: default to "pairing" once durable Linq pairing setup is supported.
       dmPolicy: z.enum(["pairing", "open", "disabled"]).default("open").optional(),
       allowFrom: z.array(allowFromEntrySchema).optional(),
-      webhookUrl: z.string().url().optional(),
+      webhookUrl: publicWebhookUrlSchema.optional(),
       webhookSecret: z.union([z.string().min(1), secretRefSchema]).optional(),
-      webhookPath: z.string().regex(/^\/[A-Za-z0-9/_-]*$/u).default("/linq-webhook").optional(),
+      webhookPath: webhookPathSchema.default("/linq-webhook").optional(),
       webhookHost: z.string().min(1).optional(),
       accounts: z.record(z.string(), LinqAccountConfigSchema).optional(),
       defaultAccount: z.string().min(1).optional(),
@@ -50,9 +57,9 @@ const linqAccountJsonSchemaProperties = {
   fromPhone: { type: "string", pattern: "^\\+[1-9]\\d{6,14}$" },
   dmPolicy: { enum: ["pairing", "open", "disabled"], default: "open" },
   allowFrom: { type: "array", items: { anyOf: [{ type: "string" }, { type: "number" }] } },
-  webhookUrl: { type: "string", format: "uri" },
+  webhookUrl: { type: "string", format: "uri", pattern: "^https://" },
   webhookSecret: { anyOf: [{ type: "string", minLength: 1 }, { $ref: "#/$defs/secretRef" }] },
-  webhookPath: { type: "string", pattern: "^/[A-Za-z0-9/_-]*$", default: "/linq-webhook" },
+  webhookPath: { type: "string", pattern: "^/[A-Za-z0-9/_-]+$", default: "/linq-webhook" },
   webhookHost: { type: "string", minLength: 1 },
   accounts: { type: "object", additionalProperties: { $ref: "#" } },
   defaultAccount: { type: "string", minLength: 1 },

@@ -28,6 +28,19 @@ describe("LinqConfigSchema", () => {
     expect(invalid.success).toBe(false);
   });
 
+  it("rejects non-HTTPS webhook targets and the Gateway root path", () => {
+    expect(
+      LinqConfigSchema.safeParse({ webhookUrl: "http://localhost:3100/linq-webhook" }).success,
+    ).toBe(false);
+    expect(LinqConfigSchema.safeParse({ webhookPath: "/" }).success).toBe(false);
+    expect(
+      LinqConfigSchema.safeParse({
+        webhookUrl: "https://messages.example.com/linq-webhook",
+        webhookPath: "/linq-webhook",
+      }).success,
+    ).toBe(true);
+  });
+
   it("exposes matching public JSON-schema and runtime validation", () => {
     expect(LinqChannelConfigSchema.schema).toMatchObject({
       type: "object",
@@ -61,18 +74,33 @@ describe("LinqConfigSchema", () => {
     const manifest = JSON.parse(
       readFileSync(new URL("../../openclaw.plugin.json", import.meta.url), "utf8"),
     ) as {
-      configSchema: { properties: { accounts: unknown } };
-      channelConfigs: { linq: { schema: { properties: { accounts: unknown } } } };
+      configSchema: {
+        properties: { accounts: unknown; webhookPath: unknown; webhookUrl: unknown };
+      };
+      channelConfigs: {
+        linq: {
+          schema: {
+            properties: { accounts: unknown; webhookPath: unknown; webhookUrl: unknown };
+          };
+        };
+      };
     };
 
-    expect(manifest.configSchema.properties.accounts).toEqual({
+    const expectedAccounts = {
       type: "object",
       additionalProperties: { $ref: "#" },
-    });
-    expect(manifest.channelConfigs.linq.schema.properties.accounts).toEqual({
-      type: "object",
-      additionalProperties: { $ref: "#" },
-    });
+    };
+    const expectedWebhookUrl = { type: "string", format: "uri", pattern: "^https://" };
+    const expectedWebhookPath = {
+      type: "string",
+      pattern: "^/[A-Za-z0-9/_-]+$",
+      default: "/linq-webhook",
+    };
+    for (const schema of [manifest.configSchema, manifest.channelConfigs.linq.schema]) {
+      expect(schema.properties.accounts).toEqual(expectedAccounts);
+      expect(schema.properties.webhookUrl).toEqual(expectedWebhookUrl);
+      expect(schema.properties.webhookPath).toEqual(expectedWebhookPath);
+    }
   });
 });
 
