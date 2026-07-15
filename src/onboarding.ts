@@ -1,8 +1,6 @@
-// @ts-nocheck - Legacy setup wizard compatibility surface; the concrete setup
-// adapter lives on the channel plugin's `setup` property.
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
 import type {
-  ChannelSetupAdapter as ChannelOnboardingAdapter,
+  ChannelSetupWizardAdapter as ChannelOnboardingAdapter,
   ChannelSetupDmPolicy as ChannelOnboardingDmPolicy,
   DmPolicy,
   WizardPrompter,
@@ -158,7 +156,8 @@ async function selectLinqPhone(params: {
     return String(
       await prompter.select({
         message: "Linq sender phone number",
-        initialValue: existingPhone && phoneNumbers.includes(existingPhone) ? existingPhone : phoneNumbers[0],
+        initialValue:
+          existingPhone && phoneNumbers.includes(existingPhone) ? existingPhone : phoneNumbers[0],
         options: phoneNumbers.map((phone) => ({ value: phone, label: phone })),
       }),
     );
@@ -268,13 +267,13 @@ async function maybeCreateLinqWebhookSubscription(params: {
       targetUrl: webhookUrl,
       phoneNumber: fromPhone,
     });
-    await prompter.note(
-      `Created Linq webhook subscription ${subscription.id}.`,
-      "Linq webhook",
-    );
+    await prompter.note(`Created Linq webhook subscription ${subscription.id}.`, "Linq webhook");
     return subscription.signing_secret?.trim() || null;
   } catch (err) {
-    await prompter.note(`Could not configure Linq webhook subscription: ${String(err)}`, "Linq webhook");
+    await prompter.note(
+      `Could not configure Linq webhook subscription: ${String(err)}`,
+      "Linq webhook",
+    );
     return null;
   }
 }
