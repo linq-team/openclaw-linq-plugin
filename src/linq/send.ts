@@ -3,7 +3,9 @@ import { resolveLinqAccount, type ResolvedLinqAccount } from "./accounts.js";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
 import { parseLinqTarget, type LinqTarget } from "./targets.js";
 
-const LINQ_API_BASE = "https://api.linqapp.com/api/partner/v3";
+const LINQ_API_BASE =
+  (process.env.LINQ_API_BASE || "").trim().replace(/\/+$/, "") ||
+  "https://api.linqapp.com/api/partner/v3";
 const UA = "OpenClaw-Linq/1.0";
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 500;

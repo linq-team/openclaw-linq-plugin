@@ -1,6 +1,8 @@
 export const LINQ_INBOUND_WEBHOOK_EVENTS = ["message.received"] as const;
 
-const LINQ_API_BASE = "https://api.linqapp.com/api/partner/v3";
+const LINQ_API_BASE =
+  (process.env.LINQ_API_BASE || "").trim().replace(/\/+$/, "") ||
+  "https://api.linqapp.com/api/partner/v3";
 const UA = "OpenClaw-Linq/1.0";
 
 export type LinqWebhookSubscription = {

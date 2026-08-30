@@ -1,6 +1,8 @@
 import type { LinqProbe } from "./types.js";
 
-const LINQ_API_BASE = "https://api.linqapp.com/api/partner/v3";
+const LINQ_API_BASE =
+  (process.env.LINQ_API_BASE || "").trim().replace(/\/+$/, "") ||
+  "https://api.linqapp.com/api/partner/v3";
 
 export async function probeLinq(
   token?: string,
