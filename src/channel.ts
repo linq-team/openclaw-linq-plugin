@@ -31,7 +31,21 @@ import {
   linqSecretTargetRegistryEntries,
 } from "./linq/secret-contract.js";
 
-const meta = getChatChannelMeta("linq");
+// beta.7 gateways may import the module before the chat-channel metadata
+// registry knows plugin-manifest channels - fall back to the same values
+// the manifest (package.json openclaw.channel) declares.
+const meta = (() => {
+  try {
+    return getChatChannelMeta("linq");
+  } catch {
+    return {
+      id: "linq",
+      label: "Linq",
+      selectionLabel: "Linq (Messaging API)",
+      blurb: "iMessage, RCS, and SMS through the Linq API.",
+    } as ReturnType<typeof getChatChannelMeta>;
+  }
+})();
 
 export const linqPlugin: ChannelPlugin<ResolvedLinqAccount, LinqProbe> = {
   id: "linq",

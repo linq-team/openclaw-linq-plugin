@@ -88,7 +88,7 @@ export type LinqAccountConfig = {
   /** Phone number this account sends from (E.164). */
   fromPhone?: string;
   /** DM security policy. */
-  dmPolicy?: "pairing" | "open" | "disabled";
+  dmPolicy?: "pairing" | "allowlist" | "open" | "disabled";
   /** Allowed sender IDs (phone numbers or "*"). */
   allowFrom?: Array<string | number>;
   /** Group chat security policy. */

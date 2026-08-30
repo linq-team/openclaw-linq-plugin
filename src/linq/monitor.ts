@@ -217,9 +217,18 @@ export async function monitorLinqProvider(opts: MonitorLinqOpts = {}): Promise<v
     markAsReadLinq(chatId, token);
     startTypingLinq(chatId, token);
 
-    const storeAllowFrom = await rt.channel.pairing
-      .readAllowFromStore({ channel: "linq", accountId: accountInfo.accountId })
-      .catch(() => []);
+    // beta.7 SDKs may not implement readAllowFromStore (returns undefined,
+    // so a chained .catch throws). Tolerate missing/void/throwing here.
+    let storeAllowFrom: Array<string | number> = [];
+    try {
+      storeAllowFrom =
+        (await rt.channel.pairing.readAllowFromStore?.({
+          channel: "linq",
+          accountId: accountInfo.accountId,
+        })) ?? [];
+    } catch {
+      storeAllowFrom = [];
+    }
     const effectiveDmAllowFrom = Array.from(new Set([...allowFrom, ...storeAllowFrom]))
       .map((v) => String(v).trim())
       .filter(Boolean);
@@ -287,7 +296,7 @@ export async function monitorLinqProvider(opts: MonitorLinqOpts = {}): Promise<v
     });
 
     const replySuffix = replyContext?.id ? `\n\n[Replying to message ${replyContext.id}]` : "";
-    const body = rt.channel.reply.formatInboundEnvelope({
+    const body = rt.channel.reply.formatAgentEnvelope({
       channel: "Linq iMessage",
       from: fromLabel,
       timestamp: createdAt,
@@ -430,7 +439,13 @@ export async function monitorLinqProvider(opts: MonitorLinqOpts = {}): Promise<v
             logVerbose(`linq webhook ignored malformed message.received event ${event.event_id}`);
             return;
           }
-          await inboundDebouncer.enqueue({ event: data });
+          // The 2026.7.x SDK's inbound debouncer expects onFlush to return an
+          // {admission, completion} pair built from a flush factory; this
+          // plugin pin predates that contract, so enqueue() throws inside the
+          // SDK. Debouncing only coalesces rapid consecutive texts, so dispatch
+          // each message directly rather than depend on the version-specific
+          // debouncer shape.
+          await handleMessage(data);
         } else if (event.event_type === "reaction.received") {
           const data = event.data as LinqReactionReceivedData;
           if (!data.is_from_me && data.reaction) {
@@ -442,7 +457,9 @@ export async function monitorLinqProvider(opts: MonitorLinqOpts = {}): Promise<v
           logVerbose(`linq delivery: ${(event.data as { status?: string })?.status} msg=${(event.data as { message_id?: string })?.message_id}`);
         }
       } catch (err) {
-        opts.runtime?.error?.(`linq webhook parse error: ${String(err)}`);
+        opts.runtime?.error?.(
+          `linq webhook parse error: ${String(err)} :: STACK ${(err as Error)?.stack ?? "no-stack"}`,
+        );
       }
     },
   });

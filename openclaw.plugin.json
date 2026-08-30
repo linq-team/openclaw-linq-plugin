@@ -12,7 +12,7 @@
       },
       "tokenFile": { "type": "string", "minLength": 1 },
       "fromPhone": { "type": "string", "pattern": "^\\+[1-9]\\d{6,14}$" },
-      "dmPolicy": { "enum": ["pairing", "open", "disabled"], "default": "open" },
+      "dmPolicy": { "enum": ["pairing", "allowlist", "open", "disabled"], "default": "open" },
       "allowFrom": {
         "type": "array",
         "items": { "anyOf": [{ "type": "string" }, { "type": "number" }] }
@@ -56,7 +56,7 @@
           },
           "tokenFile": { "type": "string", "minLength": 1 },
           "fromPhone": { "type": "string", "pattern": "^\\+[1-9]\\d{6,14}$" },
-          "dmPolicy": { "enum": ["pairing", "open", "disabled"], "default": "open" },
+          "dmPolicy": { "enum": ["pairing", "allowlist", "open", "disabled"], "default": "open" },
           "allowFrom": {
             "type": "array",
             "items": { "anyOf": [{ "type": "string" }, { "type": "number" }] }

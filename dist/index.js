@@ -14547,7 +14547,7 @@ var LinqAccountConfigSchema = external_exports.lazy(
     tokenFile: external_exports.string().min(1).optional(),
     fromPhone: e164PhoneSchema.optional(),
     // TODO: default to "pairing" once durable Linq pairing setup is supported.
-    dmPolicy: external_exports.enum(["pairing", "open", "disabled"]).default("open").optional(),
+    dmPolicy: external_exports.enum(["pairing", "allowlist", "open", "disabled"]).default("open").optional(),
     allowFrom: external_exports.array(allowFromEntrySchema).optional(),
     webhookUrl: external_exports.string().url().optional(),
     webhookSecret: external_exports.union([external_exports.string().min(1), secretRefSchema]).optional(),
@@ -15206,7 +15206,15 @@ async function monitorLinqProvider(opts = {}) {
     }
     markAsReadLinq(chatId, token);
     startTypingLinq(chatId, token);
-    const storeAllowFrom = await rt.channel.pairing.readAllowFromStore({ channel: "linq", accountId: accountInfo.accountId }).catch(() => []);
+    let storeAllowFrom = [];
+    try {
+      storeAllowFrom = await rt.channel.pairing.readAllowFromStore?.({
+        channel: "linq",
+        accountId: accountInfo.accountId
+      }) ?? [];
+    } catch {
+      storeAllowFrom = [];
+    }
     const effectiveDmAllowFrom = Array.from(/* @__PURE__ */ new Set([...allowFrom, ...storeAllowFrom])).map((v) => String(v).trim()).filter(Boolean);
     const dmHasWildcard = effectiveDmAllowFrom.includes("*");
     const dmAuthorized = dmPolicy2 === "open" ? true : dmHasWildcard || effectiveDmAllowFrom.length > 0 && isAllowedLinqSender(effectiveDmAllowFrom, sender);
@@ -15264,7 +15272,7 @@ async function monitorLinqProvider(opts = {}) {
     const replySuffix = replyContext?.id ? `
 
 [Replying to message ${replyContext.id}]` : "";
-    const body = rt.channel.reply.formatInboundEnvelope({
+    const body = rt.channel.reply.formatAgentEnvelope({
       channel: "Linq iMessage",
       from: fromLabel,
       timestamp: createdAt,
@@ -15396,7 +15404,7 @@ async function monitorLinqProvider(opts = {}) {
             logVerbose(`linq webhook ignored malformed message.received event ${event.event_id}`);
             return;
           }
-          await inboundDebouncer.enqueue({ event: data });
+          await handleMessage(data);
         } else if (event.event_type === "reaction.received") {
           const data = event.data;
           if (!data.is_from_me && data.reaction) {
@@ -15408,7 +15416,9 @@ async function monitorLinqProvider(opts = {}) {
           logVerbose(`linq delivery: ${event.data?.status} msg=${event.data?.message_id}`);
         }
       } catch (err) {
-        opts.runtime?.error?.(`linq webhook parse error: ${String(err)}`);
+        opts.runtime?.error?.(
+          `linq webhook parse error: ${String(err)} :: STACK ${err?.stack ?? "no-stack"}`
+        );
       }
     }
   });
@@ -16008,7 +16018,18 @@ function collectLinqRuntimeConfigAssignments(params) {
 }
 
 // src/channel.ts
-var meta3 = getChatChannelMeta("linq");
+var meta3 = (() => {
+  try {
+    return getChatChannelMeta("linq");
+  } catch {
+    return {
+      id: "linq",
+      label: "Linq",
+      selectionLabel: "Linq (Messaging API)",
+      blurb: "iMessage, RCS, and SMS through the Linq API."
+    };
+  }
+})();
 var linqPlugin = {
   id: "linq",
   meta: {
