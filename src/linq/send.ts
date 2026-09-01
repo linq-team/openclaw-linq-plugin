@@ -2,8 +2,8 @@ import type { LinqSendResult } from "./types.js";
 import { resolveLinqAccount, type ResolvedLinqAccount } from "./accounts.js";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
 import { parseLinqTarget, type LinqTarget } from "./targets.js";
+import { linqApiBase } from "./apiBase.js";
 
-const LINQ_API_BASE = "https://api.linqapp.com/api/partner/v3";
 const UA = "OpenClaw-Linq/1.0";
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 500;
@@ -41,9 +41,9 @@ function buildSendUrl(target: LinqTarget, fromPhone?: string): string {
     if (!fromPhone?.trim()) {
       throw new Error("Linq phone targets require fromPhone on the selected account");
     }
-    return `${LINQ_API_BASE}/chats`;
+    return `${linqApiBase()}/chats`;
   }
-  return `${LINQ_API_BASE}/chats/${encodeURIComponent(target.chatId)}/messages`;
+  return `${linqApiBase()}/chats/${encodeURIComponent(target.chatId)}/messages`;
 }
 
 function buildSendBody(
@@ -156,21 +156,21 @@ async function fireAndForget(url: string, init: RequestInit): Promise<boolean> {
 }
 
 export async function startTypingLinq(chatId: string, token: string): Promise<boolean> {
-  return fireAndForget(`${LINQ_API_BASE}/chats/${encodeURIComponent(chatId)}/typing`, {
+  return fireAndForget(`${linqApiBase()}/chats/${encodeURIComponent(chatId)}/typing`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "User-Agent": UA },
   });
 }
 
 export async function stopTypingLinq(chatId: string, token: string): Promise<boolean> {
-  return fireAndForget(`${LINQ_API_BASE}/chats/${encodeURIComponent(chatId)}/typing`, {
+  return fireAndForget(`${linqApiBase()}/chats/${encodeURIComponent(chatId)}/typing`, {
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}`, "User-Agent": UA },
   });
 }
 
 export async function markAsReadLinq(chatId: string, token: string): Promise<boolean> {
-  return fireAndForget(`${LINQ_API_BASE}/chats/${encodeURIComponent(chatId)}/read`, {
+  return fireAndForget(`${linqApiBase()}/chats/${encodeURIComponent(chatId)}/read`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "User-Agent": UA },
   });
@@ -182,7 +182,7 @@ export async function sendReactionLinq(
   token: string,
   operation: "add" | "remove" = "add",
 ): Promise<boolean> {
-  return fireAndForget(`${LINQ_API_BASE}/messages/${encodeURIComponent(messageId)}/reactions`, {
+  return fireAndForget(`${linqApiBase()}/messages/${encodeURIComponent(messageId)}/reactions`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,

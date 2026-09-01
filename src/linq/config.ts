@@ -17,7 +17,7 @@ export const LinqAccountConfigSchema: z.ZodType<Record<string, unknown>> = z.laz
       tokenFile: z.string().min(1).optional(),
       fromPhone: e164PhoneSchema.optional(),
       // TODO: default to "pairing" once durable Linq pairing setup is supported.
-      dmPolicy: z.enum(["pairing", "open", "disabled"]).default("open").optional(),
+      dmPolicy: z.enum(["pairing", "allowlist", "open", "disabled"]).default("open").optional(),
       allowFrom: z.array(allowFromEntrySchema).optional(),
       webhookUrl: z.string().url().optional(),
       webhookSecret: z.union([z.string().min(1), secretRefSchema]).optional(),
@@ -25,6 +25,7 @@ export const LinqAccountConfigSchema: z.ZodType<Record<string, unknown>> = z.laz
       webhookHost: z.string().min(1).optional(),
       accounts: z.record(z.string(), LinqAccountConfigSchema).optional(),
       defaultAccount: z.string().min(1).optional(),
+      apiBase: z.string().url().optional(),
     })
     .strict()
     .superRefine((value, ctx) => {
@@ -50,7 +51,7 @@ export const LinqConfigJsonSchema = {
     apiToken: { anyOf: [{ type: "string", minLength: 1 }, { $ref: "#/$defs/secretRef" }] },
     tokenFile: { type: "string", minLength: 1 },
     fromPhone: { type: "string", pattern: "^\\+[1-9]\\d{6,14}$" },
-    dmPolicy: { enum: ["pairing", "open", "disabled"], default: "open" },
+    dmPolicy: { enum: ["pairing", "allowlist", "open", "disabled"], default: "open" },
     allowFrom: { type: "array", items: { anyOf: [{ type: "string" }, { type: "number" }] } },
     webhookUrl: { type: "string", format: "uri" },
     webhookSecret: { anyOf: [{ type: "string", minLength: 1 }, { $ref: "#/$defs/secretRef" }] },
@@ -58,6 +59,7 @@ export const LinqConfigJsonSchema = {
     webhookHost: { type: "string", minLength: 1 },
     accounts: { type: "object", additionalProperties: true },
     defaultAccount: { type: "string", minLength: 1 },
+    apiBase: { type: "string", format: "uri" },
   },
   $defs: {
     secretRef: {
