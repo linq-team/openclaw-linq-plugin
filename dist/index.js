@@ -14854,6 +14854,42 @@ function parseLinqTarget(rawTarget, defaultAccountId) {
   );
 }
 
+// src/linq/format.ts
+import {
+  convertMarkdownTables,
+  markdownToIR,
+  renderMarkdownWithMarkers
+} from "openclaw/plugin-sdk/text-chunking";
+var PLAIN_STYLES = {};
+var DEFAULT_TABLE_MODE = "bullets";
+function tableMode(cfg) {
+  const configured2 = cfg?.markdown?.tableMode;
+  return typeof configured2 === "string" && configured2 ? configured2 : DEFAULT_TABLE_MODE;
+}
+function toPlainText(markdown, cfg) {
+  const source = markdown ?? "";
+  if (!source.trim()) return source;
+  try {
+    const ir = markdownToIR(convertMarkdownTables(source, tableMode(cfg)));
+    const rendered = renderMarkdownWithMarkers(ir, {
+      styleMarkers: PLAIN_STYLES,
+      // Nothing downstream re-interprets this text, so escaping would only add
+      // backslashes for a human to read past.
+      escapeText: (text) => text,
+      // Dropping the markup must not drop the destination. A bare URL is
+      // already its own label, so only append the href when it differs.
+      buildLink: (link, text) => {
+        const href = link.href?.trim();
+        if (!href || href === text.trim()) return null;
+        return { start: link.start, end: link.end, open: "", close: ` (${href})` };
+      }
+    });
+    return rendered.replace(/\n{3,}/g, "\n\n").trim();
+  } catch {
+    return source;
+  }
+}
+
 // src/linq/send.ts
 var UA = "OpenClaw-Linq/1.0";
 var MAX_RETRIES = 2;
@@ -14893,7 +14929,7 @@ async function sendMessageLinq(to, text, opts = {}) {
   const account = opts.account && (!target.accountId || target.accountId === opts.account.accountId) ? opts.account : opts.config ? resolveLinqAccount({ cfg: opts.config, accountId: target.accountId ?? opts.accountId }) : opts.account;
   const parts = [];
   if (text) {
-    parts.push({ type: "text", value: text });
+    parts.push({ type: "text", value: toPlainText(text, opts.config) });
   }
   if (opts.mediaUrl?.trim()) {
     parts.push({ type: "media", url: opts.mediaUrl.trim() });

@@ -3,6 +3,7 @@ import { resolveLinqAccount, type ResolvedLinqAccount } from "./accounts.js";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
 import { parseLinqTarget, type LinqTarget } from "./targets.js";
 import { linqApiBase } from "./apiBase.js";
+import { toPlainText } from "./format.js";
 
 const UA = "OpenClaw-Linq/1.0";
 const MAX_RETRIES = 2;
@@ -75,7 +76,10 @@ export async function sendMessageLinq(
 
   const parts: Array<Record<string, unknown>> = [];
   if (text) {
-    parts.push({ type: "text", value: text });
+    // Rendered here rather than at the call sites: this is the one place every
+    // outbound message passes through, so a new caller cannot forget it and
+    // ship raw asterisks to a handset.
+    parts.push({ type: "text", value: toPlainText(text, opts.config) });
   }
   if (opts.mediaUrl?.trim()) {
     parts.push({ type: "media", url: opts.mediaUrl.trim() });
