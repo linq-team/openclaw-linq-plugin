@@ -1,8 +1,6 @@
+import { linqApiBase } from "./apiBase.js";
 export const LINQ_INBOUND_WEBHOOK_EVENTS = ["message.received"] as const;
 
-const LINQ_API_BASE =
-  (process.env.LINQ_API_BASE || "").trim().replace(/\/+$/, "") ||
-  "https://api.linqapp.com/api/partner/v3";
 const UA = "OpenClaw-Linq/1.0";
 
 export type LinqWebhookSubscription = {
@@ -40,7 +38,7 @@ async function fetchLinq(
   path: string,
   init: RequestInit = {},
 ): Promise<Response> {
-  const response = await fetch(`${LINQ_API_BASE}${path}`, {
+  const response = await fetch(`${linqApiBase()}${path}`, {
     ...init,
     headers: {
       Authorization: `Bearer ${token}`,

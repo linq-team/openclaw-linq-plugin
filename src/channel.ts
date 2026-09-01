@@ -30,6 +30,7 @@ import {
   collectLinqRuntimeConfigAssignments,
   linqSecretTargetRegistryEntries,
 } from "./linq/secret-contract.js";
+import { apiBaseFromConfig, setLinqApiBase } from "./linq/apiBase.js";
 
 // beta.7 gateways may import the module before the chat-channel metadata
 // registry knows plugin-manifest channels - fall back to the same values
@@ -314,6 +315,10 @@ export const linqPlugin: ChannelPlugin<ResolvedLinqAccount, LinqProbe> = {
   gateway: {
     startAccount: async (ctx) => {
       const account = ctx.account;
+      // Before anything that calls the API — probeLinq below is the first.
+      // Re-applied on every start, so a config reload retargets the channel
+      // without recreating the container.
+      setLinqApiBase(apiBaseFromConfig(ctx.cfg));
       const token = account.token.trim();
       let phoneLabel = "";
       try {

@@ -14596,9 +14596,9 @@ function listLinqAccountIds(cfg) {
 }
 function resolveDefaultLinqAccountId(cfg) {
   const linqSection = cfg.channels?.linq;
-  const configured = linqSection?.defaultAccount?.trim();
-  if (configured) {
-    return normalizeAccountId(configured);
+  const configured2 = linqSection?.defaultAccount?.trim();
+  if (configured2) {
+    return normalizeAccountId(configured2);
   }
   const ids = listLinqAccountIds(cfg);
   if (ids.includes(DEFAULT_ACCOUNT_ID)) {
@@ -14758,14 +14758,29 @@ function resolveLinqAccountForStatus(params) {
   };
 }
 
+// src/linq/apiBase.ts
+var DEFAULT_LINQ_API_BASE = "https://api.linqapp.com/api/partner/v3";
+var trim = (value) => (value ?? "").trim().replace(/\/+$/, "");
+var configured = "";
+function setLinqApiBase(value) {
+  configured = trim(value);
+}
+function apiBaseFromConfig(cfg) {
+  const channels = cfg?.channels;
+  const linq = channels?.linq;
+  return typeof linq?.apiBase === "string" ? linq.apiBase : void 0;
+}
+function linqApiBase() {
+  return configured || trim(process.env.LINQ_API_BASE) || DEFAULT_LINQ_API_BASE;
+}
+
 // src/linq/probe.ts
-var LINQ_API_BASE = (process.env.LINQ_API_BASE || "").trim().replace(/\/+$/, "") || "https://api.linqapp.com/api/partner/v3";
 async function probeLinq(token, timeoutMs) {
   const resolvedToken = token?.trim() ?? "";
   if (!resolvedToken) {
     return { ok: false, error: "Linq API token not configured" };
   }
-  const url2 = `${LINQ_API_BASE}/phone_numbers`;
+  const url2 = `${linqApiBase()}/phone_numbers`;
   const controller = new AbortController();
   const timer = timeoutMs && timeoutMs > 0 ? setTimeout(() => controller.abort(), timeoutMs) : null;
   try {
@@ -14842,7 +14857,6 @@ function parseLinqTarget(rawTarget, defaultAccountId) {
 }
 
 // src/linq/send.ts
-var LINQ_API_BASE2 = (process.env.LINQ_API_BASE || "").trim().replace(/\/+$/, "") || "https://api.linqapp.com/api/partner/v3";
 var UA = "OpenClaw-Linq/1.0";
 var MAX_RETRIES = 2;
 var RETRY_DELAY_MS = 500;
@@ -14863,9 +14877,9 @@ function buildSendUrl(target, fromPhone) {
     if (!fromPhone?.trim()) {
       throw new Error("Linq phone targets require fromPhone on the selected account");
     }
-    return `${LINQ_API_BASE2}/chats`;
+    return `${linqApiBase()}/chats`;
   }
-  return `${LINQ_API_BASE2}/chats/${encodeURIComponent(target.chatId)}/messages`;
+  return `${linqApiBase()}/chats/${encodeURIComponent(target.chatId)}/messages`;
 }
 function buildSendBody(target, message, fromPhone) {
   if (target.kind === "phone") {
@@ -14940,13 +14954,13 @@ async function fireAndForget(url2, init) {
   }
 }
 async function startTypingLinq(chatId, token) {
-  return fireAndForget(`${LINQ_API_BASE2}/chats/${encodeURIComponent(chatId)}/typing`, {
+  return fireAndForget(`${linqApiBase()}/chats/${encodeURIComponent(chatId)}/typing`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "User-Agent": UA }
   });
 }
 async function markAsReadLinq(chatId, token) {
-  return fireAndForget(`${LINQ_API_BASE2}/chats/${encodeURIComponent(chatId)}/read`, {
+  return fireAndForget(`${linqApiBase()}/chats/${encodeURIComponent(chatId)}/read`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "User-Agent": UA }
   });
@@ -15442,7 +15456,6 @@ import {
 
 // src/linq/subscriptions.ts
 var LINQ_INBOUND_WEBHOOK_EVENTS = ["message.received"];
-var LINQ_API_BASE3 = (process.env.LINQ_API_BASE || "").trim().replace(/\/+$/, "") || "https://api.linqapp.com/api/partner/v3";
 var UA2 = "OpenClaw-Linq/1.0";
 var LinqApiError = class extends Error {
   status;
@@ -15459,7 +15472,7 @@ async function fetchLinqJson(token, path, init = {}) {
   return await response.json();
 }
 async function fetchLinq(token, path, init = {}) {
-  const response = await fetch(`${LINQ_API_BASE3}${path}`, {
+  const response = await fetch(`${linqApiBase()}${path}`, {
     ...init,
     headers: {
       Authorization: `Bearer ${token}`,
@@ -15808,15 +15821,15 @@ var dmPolicy = {
 var linqOnboardingAdapter = {
   channel,
   getStatus: async ({ cfg }) => {
-    const configured = listLinqAccountIds(cfg).some(
+    const configured2 = listLinqAccountIds(cfg).some(
       (accountId) => Boolean(resolveLinqAccountForStatus({ cfg, accountId }).token)
     );
     return {
       channel,
-      configured,
-      statusLines: [`Linq: ${configured ? "configured" : "needs token"}`],
-      selectionHint: configured ? "recommended \xB7 configured" : "recommended \xB7 iMessage blue bubbles",
-      quickstartScore: configured ? 1 : 10
+      configured: configured2,
+      statusLines: [`Linq: ${configured2 ? "configured" : "needs token"}`],
+      selectionHint: configured2 ? "recommended \xB7 configured" : "recommended \xB7 iMessage blue bubbles",
+      quickstartScore: configured2 ? 1 : 10
     };
   },
   configure: async ({
@@ -16266,6 +16279,7 @@ var linqPlugin = {
   gateway: {
     startAccount: async (ctx) => {
       const account = ctx.account;
+      setLinqApiBase(apiBaseFromConfig(ctx.cfg));
       const token = account.token.trim();
       let phoneLabel = "";
       try {

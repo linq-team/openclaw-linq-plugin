@@ -117,4 +117,12 @@ export type LinqAccountConfig = {
   accounts?: Record<string, LinqAccountConfig>;
   /** Preferred default account id. */
   defaultAccount?: string;
+  /**
+   * Partner API origin, including the version path. Defaults to Linq's own
+   * cloud. Set it to point the channel at an API-compatible host instead —
+   * MLabRelay serves this surface for pooled lines. Config rather than env
+   * because a cell is created before its channel is connected, so an env var
+   * can never carry a value that is only known at connect time.
+   */
+  apiBase?: string;
 };

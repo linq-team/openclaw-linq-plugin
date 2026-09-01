@@ -1,8 +1,6 @@
 import type { LinqProbe } from "./types.js";
+import { linqApiBase } from "./apiBase.js";
 
-const LINQ_API_BASE =
-  (process.env.LINQ_API_BASE || "").trim().replace(/\/+$/, "") ||
-  "https://api.linqapp.com/api/partner/v3";
 
 export async function probeLinq(
   token?: string,
@@ -13,7 +11,7 @@ export async function probeLinq(
     return { ok: false, error: "Linq API token not configured" };
   }
 
-  const url = `${LINQ_API_BASE}/phone_numbers`;
+  const url = `${linqApiBase()}/phone_numbers`;
   const controller = new AbortController();
   const timer = timeoutMs && timeoutMs > 0 ? setTimeout(() => controller.abort(), timeoutMs) : null;
 
