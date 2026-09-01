@@ -64,3 +64,40 @@ describe("apiBase is accepted by the config schema", () => {
       .toBe(false);
   });
 });
+
+describe("every published schema declares apiBase", () => {
+  it("checks the whole manifest, not one hand-picked key", async () => {
+    // Shipped broken once: apiBase was added to `configSchema` but NOT to
+    // `channelConfigs.linq.schema`, which is the one the gateway validates
+    // `channels.linq` against. Every gateway then refused to start with
+    // 'must not have additional properties: "apiBase"' — a crash loop, not a
+    // degraded channel. So walk the manifest instead of naming a path.
+    const { readFileSync } = await import("node:fs");
+    const manifest = JSON.parse(
+      readFileSync(new URL("../../openclaw.plugin.json", import.meta.url), "utf8"),
+    );
+
+    const objectSchemas: Array<{ path: string; schema: Record<string, never> }> = [];
+    const walk = (node: unknown, path: string): void => {
+      if (Array.isArray(node)) {
+        node.forEach((v, i) => walk(v, `${path}[${i}]`));
+        return;
+      }
+      if (!node || typeof node !== "object") return;
+      const obj = node as Record<string, unknown>;
+      if (obj.type === "object" && obj.properties && typeof obj.properties === "object") {
+        objectSchemas.push({ path, schema: obj.properties as Record<string, never> });
+      }
+      for (const [k, v] of Object.entries(obj)) walk(v, path ? `${path}.${k}` : k);
+    };
+    walk(manifest, "");
+
+    // Anything that knows about defaultAccount is a channel config schema and
+    // must therefore accept apiBase too.
+    const gaps = objectSchemas
+      .filter(({ schema }) => "defaultAccount" in schema && !("apiBase" in schema))
+      .map(({ path }) => path);
+    expect(gaps).toEqual([]);
+    expect(objectSchemas.some(({ schema }) => "apiBase" in schema)).toBe(true);
+  });
+});

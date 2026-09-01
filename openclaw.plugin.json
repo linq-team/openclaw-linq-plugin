@@ -205,6 +205,10 @@
           "defaultAccount": {
             "type": "string",
             "minLength": 1
+          },
+          "apiBase": {
+            "type": "string",
+            "format": "uri"
           }
         },
         "$defs": {
