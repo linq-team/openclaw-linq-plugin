@@ -40,3 +40,27 @@ describe("linq api base", () => {
     expect(apiBaseFromConfig({ channels: { linq: { apiBase: 42 } } })).toBeUndefined();
   });
 });
+
+describe("apiBase is accepted by the config schema", () => {
+  it("validates, because the schema is strict", async () => {
+    // The schema is `.strict()` / additionalProperties:false, so an undeclared
+    // key is a hard validation failure, not an ignored extra. Writing apiBase
+    // into a cell running a plugin build without it would break the channel
+    // outright — hence declaring it in BOTH schemas, and pinning that here.
+    const { LinqConfigSchema, LinqConfigJsonSchema } = await import("./config.js");
+    const parsed = LinqConfigSchema.safeParse({
+      apiToken: "tok",
+      apiBase: "https://relay.test/api/partner/v3",
+    });
+    expect(parsed.success).toBe(true);
+    expect(LinqConfigJsonSchema.properties).toHaveProperty("apiBase");
+  });
+
+  it("still rejects a genuinely unknown key", async () => {
+    // Guards against someone "fixing" a future rejection by loosening strict,
+    // which would silently accept typo'd config instead of reporting it.
+    const { LinqConfigSchema } = await import("./config.js");
+    expect(LinqConfigSchema.safeParse({ apiToken: "tok", apiBse: "x" }).success)
+      .toBe(false);
+  });
+});

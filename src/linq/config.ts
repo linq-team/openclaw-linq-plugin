@@ -25,6 +25,7 @@ export const LinqAccountConfigSchema: z.ZodType<Record<string, unknown>> = z.laz
       webhookHost: z.string().min(1).optional(),
       accounts: z.record(z.string(), LinqAccountConfigSchema).optional(),
       defaultAccount: z.string().min(1).optional(),
+      apiBase: z.string().url().optional(),
     })
     .strict()
     .superRefine((value, ctx) => {
@@ -58,6 +59,7 @@ export const LinqConfigJsonSchema = {
     webhookHost: { type: "string", minLength: 1 },
     accounts: { type: "object", additionalProperties: true },
     defaultAccount: { type: "string", minLength: 1 },
+    apiBase: { type: "string", format: "uri" },
   },
   $defs: {
     secretRef: {

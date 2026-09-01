@@ -14557,7 +14557,8 @@ var LinqAccountConfigSchema = external_exports.lazy(
     webhookPath: external_exports.string().regex(/^\/[A-Za-z0-9/_-]*$/u).default("/linq-webhook").optional(),
     webhookHost: external_exports.string().min(1).optional(),
     accounts: external_exports.record(external_exports.string(), LinqAccountConfigSchema).optional(),
-    defaultAccount: external_exports.string().min(1).optional()
+    defaultAccount: external_exports.string().min(1).optional(),
+    apiBase: external_exports.string().url().optional()
   }).strict().superRefine((value, ctx) => {
     const tokenSources = [value.apiToken, value.tokenFile].filter(Boolean);
     if (tokenSources.length > 1) {
