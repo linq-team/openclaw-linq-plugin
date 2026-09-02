@@ -90,6 +90,23 @@
       "apiBase": {
         "type": "string",
         "format": "uri"
+      },
+      "textChunkLimit": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 4000
+      },
+      "streaming": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "chunkMode": {
+            "enum": [
+              "length",
+              "newline"
+            ]
+          }
+        }
       }
     },
     "$defs": {
@@ -209,6 +226,23 @@
           "apiBase": {
             "type": "string",
             "format": "uri"
+          },
+          "textChunkLimit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4000
+          },
+          "streaming": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "chunkMode": {
+                "enum": [
+                  "length",
+                  "newline"
+                ]
+              }
+            }
           }
         },
         "$defs": {

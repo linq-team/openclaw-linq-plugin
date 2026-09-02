@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import { LinqConfigJsonSchema, LinqConfigSchema } from "./config.js";
 import { resolveLinqAccount, resolveLinqAccountForStatus } from "./accounts.js";
@@ -124,5 +125,25 @@ describe("LinqConfigSchema: outbound chunking keys", () => {
     expect(
       LinqConfigSchema.safeParse({ apiToken: "tok", streaming: { mode: "block" } }).success,
     ).toBe(false);
+  });
+});
+
+describe("openclaw.plugin.json", () => {
+  // The gateway validates channels.linq against the MANIFEST (configSchema and
+  // channelConfigs.linq.schema, both additionalProperties:false), not against the
+  // code schema — a key declared only in code makes every cell refuse to start.
+  it("declares every key the code schema declares, in both manifest schemas", () => {
+    const manifest = JSON.parse(
+      readFileSync(new URL("../../openclaw.plugin.json", import.meta.url), "utf8"),
+    );
+    const code = Object.keys(LinqConfigJsonSchema.properties);
+    for (const site of [
+      manifest.configSchema.properties,
+      manifest.channelConfigs.linq.schema.properties,
+    ]) {
+      for (const key of code) {
+        expect(Object.keys(site), `manifest is missing ${key}`).toContain(key);
+      }
+    }
   });
 });
