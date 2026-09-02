@@ -596,7 +596,7 @@ function $constructor(name, initializer3, params) {
   Object.defineProperty(_, "name", { value: name });
   return _;
 }
-var $brand = /* @__PURE__ */ Symbol("zod_brand");
+var $brand = Symbol("zod_brand");
 var $ZodAsyncError = class extends Error {
   constructor() {
     super(`Encountered Promise during synchronous parse. Use .parseAsync() instead.`);
@@ -10339,8 +10339,8 @@ function yo_default() {
 
 // node_modules/zod/v4/core/registries.js
 var _a2;
-var $output = /* @__PURE__ */ Symbol("ZodOutput");
-var $input = /* @__PURE__ */ Symbol("ZodInput");
+var $output = Symbol("ZodOutput");
+var $input = Symbol("ZodInput");
 var $ZodRegistry = class {
   constructor() {
     this._map = /* @__PURE__ */ new WeakMap();
@@ -11377,7 +11377,7 @@ function _stringbool(Classes, _params) {
     type: "pipe",
     in: stringSchema,
     out: booleanSchema,
-    transform: ((input, payload) => {
+    transform: (input, payload) => {
       let data = input;
       if (params.case !== "sensitive")
         data = data.toLowerCase();
@@ -11396,14 +11396,14 @@ function _stringbool(Classes, _params) {
         });
         return {};
       }
-    }),
-    reverseTransform: ((input, _payload) => {
+    },
+    reverseTransform: (input, _payload) => {
       if (input === true) {
         return truthyArray[0] || "true";
       } else {
         return falsyArray[0] || "false";
       }
-    }),
+    },
     error: params.error
   });
   return codec2;
@@ -14555,7 +14555,14 @@ var LinqAccountConfigSchema = external_exports.lazy(
     webhookHost: external_exports.string().min(1).optional(),
     accounts: external_exports.record(external_exports.string(), LinqAccountConfigSchema).optional(),
     defaultAccount: external_exports.string().min(1).optional(),
-    apiBase: external_exports.string().url().optional()
+    apiBase: external_exports.string().url().optional(),
+    // Outbound bubble size. The core deliver planner reads this via
+    // resolveTextChunkLimit(cfg, "linq", …); without it the adapter's
+    // static 4000 applies and a long reply lands as one iMessage.
+    textChunkLimit: external_exports.number().int().positive().max(4e3).optional(),
+    // Same planner knob as the built-in channels: "newline" flushes one
+    // paragraph per message instead of packing paragraphs up to the limit.
+    streaming: external_exports.object({ chunkMode: external_exports.enum(["length", "newline"]).optional() }).strict().optional()
   }).strict().superRefine((value, ctx) => {
     const tokenSources = [value.apiToken, value.tokenFile].filter(Boolean);
     if (tokenSources.length > 1) {

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { LinqConfigSchema } from "./config.js";
+import { LinqConfigJsonSchema, LinqConfigSchema } from "./config.js";
 import { resolveLinqAccount, resolveLinqAccountForStatus } from "./accounts.js";
 
 describe("LinqConfigSchema", () => {
@@ -99,5 +99,30 @@ describe("resolveLinqAccount", () => {
       webhookSecretSource: "none",
       fromPhone: "+15556667777",
     });
+  });
+});
+
+describe("LinqConfigSchema: outbound chunking keys", () => {
+  it("accepts textChunkLimit and streaming.chunkMode", () => {
+    const parsed = LinqConfigSchema.parse({
+      apiToken: "tok",
+      textChunkLimit: 220,
+      streaming: { chunkMode: "newline" },
+    });
+    expect(parsed.textChunkLimit).toBe(220);
+    expect(parsed.streaming?.chunkMode).toBe("newline");
+  });
+
+  it("declares both keys in the JSON schema the gateway validates against", () => {
+    const props = LinqConfigJsonSchema.properties as Record<string, unknown>;
+    expect(props.textChunkLimit).toBeDefined();
+    expect(props.streaming).toBeDefined();
+  });
+
+  it("stays strict: unknown keys are still rejected", () => {
+    expect(LinqConfigSchema.safeParse({ apiToken: "tok", bogus: 1 }).success).toBe(false);
+    expect(
+      LinqConfigSchema.safeParse({ apiToken: "tok", streaming: { mode: "block" } }).success,
+    ).toBe(false);
   });
 });

@@ -26,6 +26,16 @@ export const LinqAccountConfigSchema: z.ZodType<Record<string, unknown>> = z.laz
       accounts: z.record(z.string(), LinqAccountConfigSchema).optional(),
       defaultAccount: z.string().min(1).optional(),
       apiBase: z.string().url().optional(),
+      // Outbound bubble size. The core deliver planner reads this via
+      // resolveTextChunkLimit(cfg, "linq", …); without it the adapter's
+      // static 4000 applies and a long reply lands as one iMessage.
+      textChunkLimit: z.number().int().positive().max(4000).optional(),
+      // Same planner knob as the built-in channels: "newline" flushes one
+      // paragraph per message instead of packing paragraphs up to the limit.
+      streaming: z
+        .object({ chunkMode: z.enum(["length", "newline"]).optional() })
+        .strict()
+        .optional(),
     })
     .strict()
     .superRefine((value, ctx) => {
@@ -60,6 +70,12 @@ export const LinqConfigJsonSchema = {
     accounts: { type: "object", additionalProperties: true },
     defaultAccount: { type: "string", minLength: 1 },
     apiBase: { type: "string", format: "uri" },
+    textChunkLimit: { type: "integer", minimum: 1, maximum: 4000 },
+    streaming: {
+      type: "object",
+      additionalProperties: false,
+      properties: { chunkMode: { enum: ["length", "newline"] } },
+    },
   },
   $defs: {
     secretRef: {

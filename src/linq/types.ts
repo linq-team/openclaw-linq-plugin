@@ -99,6 +99,8 @@ export type LinqAccountConfig = {
   mediaMaxMb?: number;
   /** Max text chunk length (default: 4000). */
   textChunkLimit?: number;
+  /** Deliver-planner chunking; "newline" = one paragraph per message. */
+  streaming?: { chunkMode?: "length" | "newline" };
   /** Webhook URL for inbound messages from Linq. */
   webhookUrl?: string;
   /** Webhook HMAC signing secret or SecretRef-backed secret. */
