@@ -330,6 +330,9 @@ export async function monitorLinqProvider(opts: MonitorLinqOpts = {}): Promise<v
       return;
     }
 
+    if (linqCfg.dmPolicy === "disabled") {
+      return;
+    }
     const groupCfg: LinqGroupConfig | undefined = linqCfg.groups?.[chatId];
     if (groupCfg?.enabled === false) {
       logVerbose(`linq group ${chatId}: muted in config`);
@@ -340,16 +343,9 @@ export async function monitorLinqProvider(opts: MonitorLinqOpts = {}): Promise<v
     const nameOf = (handle: string) => names[handle] ?? handle;
     const line: GroupLine = { at: clockOf(data.received_at), from: sender, name: nameOf(sender), text: bodyText };
 
-    // 1. Into the chat's context, whoever said it.
-    const key = `${accountInfo.accountId}:${chatId}`;
-    const buffer = groupBuffers.get(key) ?? [];
-    buffer.push(line);
-    while (buffer.length > Math.max(historyLimit, 1)) {
-      buffer.shift();
-    }
-    groupBuffers.set(key, buffer);
-
-    // 2 + 3. The roster gate and the mention gate.
+    // The one await before the buffer is touched. Everything between the
+    // push below and the splice further down is synchronous, so two messages
+    // arriving together cannot interleave inside the buffer.
     let storeAllowFrom: Array<string | number> = [];
     try {
       storeAllowFrom =
@@ -360,6 +356,18 @@ export async function monitorLinqProvider(opts: MonitorLinqOpts = {}): Promise<v
     } catch {
       storeAllowFrom = [];
     }
+
+    // 1. Into the chat's context, whoever said it.
+    const key = `${accountInfo.accountId}:${chatId}`;
+    const buffer = groupBuffers.get(key) ?? [];
+    buffer.push(line);
+    while (buffer.length > Math.max(historyLimit, 1)) {
+      buffer.shift();
+    }
+    groupBuffers.set(key, buffer);
+    const myIndex = buffer.length - 1;
+
+    // 2 + 3. The roster gate and the mention gate.
     const explicitRoster = normalizeAllowList(linqCfg.groupAllowFrom);
     const roster =
       explicitRoster.length > 0
@@ -384,6 +392,12 @@ export async function monitorLinqProvider(opts: MonitorLinqOpts = {}): Promise<v
       return;
     }
 
+    // The unanswered lines before this one are this turn's context; they and
+    // this line leave the buffer, anything that landed after stays for the
+    // next turn. Still synchronous with the push above.
+    const context = buffer.slice(0, myIndex);
+    buffer.splice(0, myIndex + 1);
+
     markAsReadLinq(chatId, token);
     startTypingLinq(chatId, token);
 
@@ -394,8 +408,6 @@ export async function monitorLinqProvider(opts: MonitorLinqOpts = {}): Promise<v
       accountId: accountInfo.accountId,
       peer: { kind: "group", id: chatId },
     });
-    const context = buffer.slice(0, -1);
-    groupBuffers.set(key, []);
     const bodyForAgent = buildGroupBodyForAgent(context, line);
 
     const createdAt = data.received_at ? Date.parse(data.received_at) : undefined;
@@ -447,16 +459,13 @@ export async function monitorLinqProvider(opts: MonitorLinqOpts = {}): Promise<v
       OriginatingTo: chatId,
     });
 
+    // Deliberately no `updateLastRoute`: the main session's last route is the
+    // owner's private thread, and a group turn must never point an
+    // agent-initiated send (a digest, a message-tool call) at the group.
     await rt.channel.session.recordInboundSession({
       storePath,
       sessionKey: ctxPayload.SessionKey ?? route.sessionKey,
       ctx: ctxPayload,
-      updateLastRoute: {
-        sessionKey: route.mainSessionKey,
-        channel: "linq",
-        to: chatId,
-        accountId: route.accountId,
-      },
       onRecordError: (err) => {
         logVerbose(`linq: failed updating session meta: ${String(err)}`);
       },
@@ -501,14 +510,14 @@ export async function monitorLinqProvider(opts: MonitorLinqOpts = {}): Promise<v
     if (data.is_from_me) {
       return;
     }
-    if (data.is_group) {
-      // A group is its own path: no DM policy, no pairing, its own session.
-      await handleGroupMessage(data, sender);
-      return;
-    }
-
     if (fromPhone && data.recipient_phone !== fromPhone) {
       logVerbose(`linq: skipping message to ${data.recipient_phone} (not ${fromPhone})`);
+      return;
+    }
+    if (data.is_group) {
+      // A group is its own path: no pairing, its own session. The channel
+      // switch (dmPolicy: disabled) still applies to it.
+      await handleGroupMessage(data, sender);
       return;
     }
 
